@@ -1518,6 +1518,7 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
 
     XrActionStateFloat trigger{XR_TYPE_ACTION_STATE_FLOAT};
     getInfo.action = g.triggerAction;
+    getInfo.subactionPath = g.handPath;
     if (XR_SUCCEEDED(xrGetActionStateFloat(g.session, &getInfo, &trigger)) && trigger.isActive) {
         down = trigger.currentState > 0.5f;
         if (!g.loggedTriggerActive) {
@@ -1532,6 +1533,7 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
 
     XrActionStateVector2f stick{XR_TYPE_ACTION_STATE_VECTOR2F};
     getInfo.action = g.stickAction;
+    getInfo.subactionPath = g.handPath;
     if (XR_SUCCEEDED(xrGetActionStateVector2f(g.session, &getInfo, &stick)) && stick.isActive) {
         stickX = stick.currentState.x;
         stickY = stick.currentState.y;
@@ -1555,6 +1557,7 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
     // Grip (squeeze) recenters the virtual screen in front of the user.
     XrActionStateFloat grip{XR_TYPE_ACTION_STATE_FLOAT};
     getInfo.action = g.gripAction;
+    getInfo.subactionPath = g.handPath;
     bool gripNow = false;
     if(XR_SUCCEEDED(xrGetActionStateFloat(g.session, &getInfo, &grip)) && grip.isActive){
         gripNow = grip.currentState > 0.5f;
@@ -1574,6 +1577,12 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
         moveY = moveStick.currentState.y;
     }
     notifyMove(env, moveX, moveY);
+    if ((g.submittedFrames % 300) == 0) {
+        LOGI("input: trigger active=%d state=%.2f | rstk active=%d %.2f,%.2f | lstk active=%d %.2f,%.2f | aim=%d",
+             (int)trigger.isActive, trigger.currentState, (int)stick.isActive,
+             stick.currentState.x, stick.currentState.y, (int)moveStick.isActive,
+             moveStick.currentState.x, moveStick.currentState.y, (int)u >= 0);
+    }
 
     XrActionStateBoolean viewState{XR_TYPE_ACTION_STATE_BOOLEAN};
     getInfo.action = g.viewToggleAction;
