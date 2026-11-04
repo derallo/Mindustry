@@ -1563,6 +1563,20 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
         stickY = stick.currentState.y;
     }
 
+    // Head-pitch zoom fallback: the right stick is not being fed by this runtime.
+    // Pitch relative to the recenter reference drives zoom until the stick reports.
+    if (stickX == 0.f && stickY == 0.f && g.lookRefValid && g.viewSpace != XR_NULL_HANDLE) {
+        XrSpaceLocation pitchLoc{XR_TYPE_SPACE_LOCATION};
+        if (XR_SUCCEEDED(xrLocateSpace(g.viewSpace, g.localSpace,
+                                       frameState.predictedDisplayTime, &pitchLoc)) &&
+            (pitchLoc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+            const Quat hq{pitchLoc.pose.orientation.x, pitchLoc.pose.orientation.y,
+                          pitchLoc.pose.orientation.z, pitchLoc.pose.orientation.w};
+            const Vec3 fwd = rotate(hq, Vec3{0.f, 0.f, -1.f});
+            stickY = clampf((std::asin(clampf(fwd.y, -1.f, 1.f)) - g.refPitch) / 0.45f, -1.f, 1.f);
+        }
+    }
+
     // Short haptic tick on the trigger edge, so taps have physical feedback.
     if(down && !g.triggerDown && g.hapticAction != XR_NULL_HANDLE){
         XrHapticVibration vibration{XR_TYPE_HAPTIC_VIBRATION};
