@@ -178,7 +178,7 @@ public final class QuestVr{
 
             // World uses the globe; dialogs/menus stay on the flat quad so their UI is
             // readable and the controller aim still maps to a normal screen.
-            boolean menuOpen = Core.scene != null && Core.scene.hasDialog();
+            boolean menuOpen = (Core.scene != null && Core.scene.hasDialog()) || Vars.state.isMenu();
             int desiredView = menuOpen ? 2 : 0;
             if(lastViewMode != desiredView){
                 lastViewMode = desiredView;
