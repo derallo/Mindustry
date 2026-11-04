@@ -92,6 +92,7 @@ struct State {
     XrAction moveStickAction = XR_NULL_HANDLE;
     XrAction gripAction = XR_NULL_HANDLE;
     XrAction viewToggleAction = XR_NULL_HANDLE;
+    XrAction clickAction = XR_NULL_HANDLE;
     bool viewToggleDown = false;
     XrAction hapticAction = XR_NULL_HANDLE;
     XrSpace aimSpace = XR_NULL_HANDLE;
@@ -463,6 +464,15 @@ bool createActions() {
     actionInfo.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
     XRCHECK(xrCreateAction(g.actionSet, &actionInfo, &g.viewToggleAction));
 
+    // Fallback click: the float trigger is not being fed by this runtime, but boolean
+    // actions are (Y works), so A/X also act as the world click.
+    actionInfo.countSubactionPaths = 0;
+    actionInfo.subactionPaths = nullptr;
+    strncpy(actionInfo.actionName, "click", XR_MAX_ACTION_NAME_SIZE - 1);
+    strncpy(actionInfo.localizedActionName, "Click", XR_MAX_LOCALIZED_ACTION_NAME_SIZE - 1);
+    actionInfo.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
+    XRCHECK(xrCreateAction(g.actionSet, &actionInfo, &g.clickAction));
+
     XrActionSpaceCreateInfo spaceInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
     spaceInfo.action = g.aimAction;
     spaceInfo.subactionPath = handPath;
@@ -492,6 +502,8 @@ bool createActions() {
             {g.gripAction, "/user/hand/right/input/squeeze/value"},
             {g.hapticAction, "/user/hand/right/output/haptic"},
             {g.moveStickAction, "/user/hand/left/input/thumbstick"},
+            {g.clickAction, "/user/hand/right/input/a/click"},
+            {g.clickAction, "/user/hand/left/input/x/click"},
     };
     for (const auto &b : mainBindings) {
         XrActionSuggestedBinding binding{b.action, path(b.path)};
@@ -1588,12 +1600,51 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
         moveX = moveStick.currentState.x;
         moveY = moveStick.currentState.y;
     }
+    // Head-gaze fallback: if the aim/trigger actions are not fed (this runtime returns
+    // zero for float/vector/pose), aim with the head so the game is still clickable.
+    if (u < 0.f && g.viewSpace != XR_NULL_HANDLE) {
+        XrSpaceLocation headLoc{XR_TYPE_SPACE_LOCATION};
+        if (XR_SUCCEEDED(xrLocateSpace(g.viewSpace, g.localSpace,
+                                       frameState.predictedDisplayTime, &headLoc)) &&
+            (headLoc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
+            (headLoc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+            if (panoMode) {
+                const int globeStrength = g.globeStrength.load();
+                const float globeR = globeRadiusFor(globeStrength);
+                const float globeD = globeDistanceFor(globeStrength);
+                const float globeDisk = std::asin(clampf(globeR / globeD, 0.f, 1.f));
+                const float fwdX = -std::sin(g.panoYaw), fwdZ = -std::cos(g.panoYaw);
+                ScreenPose gazeScreen;
+                gazeScreen.orientation = Quat{0.f, std::sin(g.panoYaw * 0.5f), 0.f,
+                                              std::cos(g.panoYaw * 0.5f)};
+                gazeScreen.position = Vec3{g.panoCenter.x + fwdX * (globeD - globeR), g.panoCenter.y,
+                                           g.panoCenter.z + fwdZ * (globeD - globeR)};
+                gazeScreen.width = 2.f * globeR * std::tan(globeDisk);
+                gazeScreen.height = gazeScreen.width * 0.6f;
+                const vr::Pose gazePose{
+                        vr::Quat{headLoc.pose.orientation.x, headLoc.pose.orientation.y,
+                                 headLoc.pose.orientation.z, headLoc.pose.orientation.w},
+                        vr::Vec3{headLoc.pose.position.x, headLoc.pose.position.y,
+                                 headLoc.pose.position.z}};
+                vr::rayToScreen(gazePose, gazeScreen, u, v);
+            } else {
+                rayToScreen(headLoc.pose, u, v);
+            }
+        }
+    }
+
     notifyMove(env, moveX, moveY);
     if ((g.submittedFrames % 300) == 0) {
         LOGI("input: trigger active=%d state=%.2f | rstk active=%d %.2f,%.2f | lstk active=%d %.2f,%.2f | aim=%d",
              (int)trigger.isActive, trigger.currentState, (int)stick.isActive,
              stick.currentState.x, stick.currentState.y, (int)moveStick.isActive,
              moveStick.currentState.x, moveStick.currentState.y, (int)u >= 0);
+    }
+
+    XrActionStateBoolean clickState{XR_TYPE_ACTION_STATE_BOOLEAN};
+    getInfo.action = g.clickAction;
+    if (XR_SUCCEEDED(xrGetActionStateBoolean(g.session, &getInfo, &clickState)) && clickState.currentState == XR_TRUE) {
+        down = true;
     }
 
     XrActionStateBoolean viewState{XR_TYPE_ACTION_STATE_BOOLEAN};
