@@ -138,7 +138,9 @@ struct State {
     // parallax. Two single-eye projection swapchains are used (the documented array
     // fallback) because they are the safest path on Adreno.
     std::atomic<bool> worldView{false};         // Java: Vars.state.isGame()
-    std::atomic<int> viewMode{0};               // 0 = panorama (default), 1 = flat 4.4m, 2 = flat full 5.2m
+    std::atomic<int> viewMode{0};
+    std::atomic<int> globeStrength{2};
+    float globeDistance = 2.0f; // metres from the eye to the sphere centre
     std::atomic<bool> projectionActive{false};  // last submitted frame used a projection layer
     std::atomic<bool> shipReady{false};
     std::atomic<bool> panoRecenterRequested{false};
@@ -172,6 +174,7 @@ struct State {
     GLuint panoProg = 0;
     GLint panoTex = -1, panoTan = -1, panoEyeQuat = -1, panoEyePos = -1, panoRefCenter = -1;
     GLint panoRefRight = -1, panoRefFwd = -1, panoRadiusLoc = -1, panoSpan = -1, panoFade = -1;
+    GLint panoGlobeK = -1, panoGlobeD = -1, panoGlobeHalf = -1;
     GLuint fullscreenVao = 0;
 
     GLuint shipProg = 0;
@@ -193,6 +196,12 @@ struct State {
     bool useReadback = false;
     std::vector<unsigned char> readbackPixels;
 };
+
+static float globeKFor(int strength) {
+    // 0 = small/curved globe, 4 = giant/flat globe. Values are radius/distance.
+    static const float values[] = {0.55f, 0.70f, 0.82f, 0.92f, 0.985f};
+    return values[strength < 0 ? 0 : (strength > 4 ? 4 : strength)];
+}
 
 State g;
 
@@ -857,8 +866,10 @@ bool ensurePanoProgram() {
         "uniform vec3 uRefRight;   // pano reference right (+X)\n"
         "uniform vec3 uRefFwd;     // pano reference forward (-Z)\n"
         "uniform float uRadius;\n"
-        "uniform vec2 uSpan;       // capture angular span (rad)\n"
-        "uniform vec4 uFade;       // edge inner/outer, vignette inner/outer\n"
+        "uniform float uGlobeK;    // sphere radius / distance\n"
+        "uniform float uGlobeD;    // sphere centre distance\n"
+        "uniform vec2 uGlobeHalf;  // capture half longitude/latitude (rad)\n"
+        "uniform vec4 uFade;\n"
         "vec3 qrot(vec4 q, vec3 v){\n"
         "  return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);\n"
         "}\n"
@@ -866,27 +877,29 @@ bool ensurePanoProgram() {
         "  float tanX = mix(uTan.x, uTan.y, (vNdc.x + 1.0) * 0.5);\n"
         "  float tanY = mix(uTan.z, uTan.w, (vNdc.y + 1.0) * 0.5);\n"
         "  vec3 dir = normalize(qrot(uEyeQuat, vec3(tanX, tanY, -1.0)));\n"
-        "  vec3 rel = uEyePos - uRefCenter;\n"
-        "  float a = dot(dir.xz, dir.xz);\n"
-        "  float b = 2.0 * dot(rel.xz, dir.xz);\n"
-        "  float c = dot(rel.xz, rel.xz) - uRadius * uRadius;\n"
-        "  float disc = b * b - 4.0 * a * c;\n"
+        "  vec3 sphere = uRefCenter + uRefFwd * uGlobeD;\n"
+        "  float radius = uGlobeD * uGlobeK;\n"
+        "  vec3 oc = uEyePos - sphere;\n"
+        "  float b = dot(oc, dir);\n"
+        "  float c = dot(oc, oc) - radius * radius;\n"
+        "  float disc = b * b - c;\n"
         "  vec3 col = vec3(0.0);\n"
-        "  if(a > 1e-7 && disc >= 0.0){\n"
-        "    float t = (-b + sqrt(disc)) / (2.0 * a);\n"
+        "  if(disc >= 0.0){\n"
+        "    float t = -b - sqrt(disc);\n"
         "    if(t > 0.0){\n"
-        "      vec3 hit = rel + dir * t;\n"
-        "      float x = dot(hit, uRefRight);\n"
-        "      float z = dot(hit, uRefFwd);\n"
-        "      float yaw = atan(x, z);\n"
-        "      float pitch = atan(hit.y, length(hit.xz));\n"
-        "      vec2 uv = vec2(0.5 + yaw / uSpan.x, 0.5 + pitch / uSpan.y);\n"
-        "      float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));\n"
-        "      float edgeFade = smoothstep(uFade.x, uFade.y, edge);\n"
-        "      vec3 tex = texture(uTex, clamp(uv, vec2(0.001), vec2(0.999))).rgb;\n"
-        "      float lum = dot(tex, vec3(0.299, 0.587, 0.114));\n"
-        "      tex = mix(vec3(lum), tex, 1.0 - 0.28 * (1.0 - edgeFade));\n"
-        "      col = tex * edgeFade;\n"
+        "      vec3 point = uEyePos + dir * t;\n"
+        "      vec3 q = point - sphere;\n"
+        "      if(dot(q, uRefFwd) < 0.0){\n"
+        "        float lon = atan(dot(q, uRefRight), -dot(q, uRefFwd));\n"
+        "        float lat = asin(clamp(dot(q, vec3(0.0, 1.0, 0.0)) / radius, -1.0, 1.0));\n"
+        "        vec2 uv = vec2(0.5 + lon / (2.0 * uGlobeHalf.x), 0.5 + lat / (2.0 * uGlobeHalf.y));\n"
+        "        float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));\n"
+        "        float edgeFade = smoothstep(uFade.x, uFade.y, edge);\n"
+        "        vec3 tex = texture(uTex, clamp(uv, vec2(0.002), vec2(0.998))).rgb;\n"
+        "        float lum = dot(tex, vec3(0.299, 0.587, 0.114));\n"
+        "        tex = mix(vec3(lum), tex, 1.0 - 0.25 * (1.0 - edgeFade));\n"
+        "        col = tex * edgeFade;\n"
+        "      }\n"
         "    }\n"
         "  }\n"
         "  float ang = atan(length(vec2(tanX, tanY)));\n"
@@ -906,8 +919,10 @@ bool ensurePanoProgram() {
     g.panoRefRight = glGetUniformLocation(g.panoProg, "uRefRight");
     g.panoRefFwd = glGetUniformLocation(g.panoProg, "uRefFwd");
     g.panoRadiusLoc = glGetUniformLocation(g.panoProg, "uRadius");
-    g.panoSpan = glGetUniformLocation(g.panoProg, "uSpan");
     g.panoFade = glGetUniformLocation(g.panoProg, "uFade");
+    g.panoGlobeK = glGetUniformLocation(g.panoProg, "uGlobeK");
+    g.panoGlobeD = glGetUniformLocation(g.panoProg, "uGlobeD");
+    g.panoGlobeHalf = glGetUniformLocation(g.panoProg, "uGlobeHalf");
 
     glGenVertexArrays(1, &g.fullscreenVao);
     LOGI("panorama shader ready");
@@ -1174,8 +1189,11 @@ void drawPano(int eye, const XrView &view, int captureBuffer) {
     glUniform3f(g.panoRefRight, std::cos(g.panoYaw), 0.f, -std::sin(g.panoYaw));
     glUniform3f(g.panoRefFwd, -std::sin(g.panoYaw), 0.f, -std::cos(g.panoYaw));
     glUniform1f(g.panoRadiusLoc, g.panoRadius);
-    glUniform2f(g.panoSpan, g.panoSpanH, g.panoSpanV);
-    glUniform4f(g.panoFade, 0.004f, 0.060f, 0.62f, 1.02f);
+    const float globeK = globeKFor(g.globeStrength.load());
+    glUniform1f(g.panoGlobeK, globeK);
+    glUniform1f(g.panoGlobeD, g.globeDistance);
+    glUniform2f(g.panoGlobeHalf, 1.57079632679f, 0.94247779607f); // 90 x 54 deg texture coverage
+    glUniform4f(g.panoFade, 0.010f, 0.055f, 0.62f, 1.02f);
     glBindVertexArray(g.fullscreenVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
@@ -1191,8 +1209,10 @@ void drawShip(int eye, const XrView &view) {
 
     const float pu = clampf(g.playerU.load(), 0.f, 1.f);
     const float pv = clampf(g.playerV.load(), 0.f, 1.f);
-    const PanoView pano{g.panoCenter, g.panoYaw, g.panoRadius, g.panoSpanH, g.panoSpanV};
-    const Vec3 dir = panoDirection(pano, pu, pv);
+    const GlobeView globe{g.panoCenter, g.panoYaw, g.globeDistance,
+                          globeKFor(g.globeStrength.load()),
+                          1.57079632679f, 0.94247779607f};
+    const Vec3 dir = globeDirection(globe, pu, pv);
 
     // Put the ship in front of the cylinder so it gains real stereo disparity against the map.
     const float dist = g.panoRadius * 0.82f;
@@ -1455,12 +1475,14 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
         (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
         (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
         if (panoMode) {
-            const PanoView pano{g.panoCenter, g.panoYaw, g.panoRadius, g.panoSpanH, g.panoSpanV};
+            const GlobeView globe{g.panoCenter, g.panoYaw, g.globeDistance,
+                                  globeKFor(g.globeStrength.load()),
+                                  1.57079632679f, 0.94247779607f};
             const Pose aim{Quat{location.pose.orientation.x, location.pose.orientation.y,
                                 location.pose.orientation.z, location.pose.orientation.w},
                            Vec3{location.pose.position.x, location.pose.position.y,
                                 location.pose.position.z}};
-            rayToPano(aim, pano, u, v);
+            globeProject(aim, globe, u, v);
         } else {
             rayToScreen(location.pose, u, v);
         }
@@ -1811,6 +1833,12 @@ bool isActive() { return g.active.load(); }
 void setSolidDebug(bool solid) { g.solidDebug = solid; }
 
 void setLookAround(bool enabled) { g.lookAround.store(enabled); }
+
+void setGlobeStrength(int strength) {
+    const int clamped = strength < 0 ? 0 : (strength > 4 ? 4 : strength);
+    g.globeStrength.store(clamped);
+    LOGI("globe strength -> %d (radius/distance %.3f)", clamped, globeKFor(clamped));
+}
 
 void setViewMode(int mode) {
     g.viewMode.store(mode == 2 ? 2 : (mode == 1 ? 1 : 0));

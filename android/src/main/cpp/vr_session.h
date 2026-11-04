@@ -39,6 +39,9 @@ void setWorldView(bool enabled);
 /** In-game presentation: 0 = panorama projection, 1 = flat quad screen. */
 void setViewMode(int mode);
 
+/** Globe curvature strength 0..4 (0 = small/curved, 4 = giant/flat). */
+void setGlobeStrength(int strength);
+
 /** True when the last submitted frame used the projection layer. */
 bool worldViewActive();
 

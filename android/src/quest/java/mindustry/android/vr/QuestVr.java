@@ -82,7 +82,8 @@ public final class QuestVr{
         VrSession.setLookAround(Core.settings.getBool("vrlookaround", false));
         Log.info("VR: quad look-around: @", Core.settings.getBool("vrlookaround", false));
         VrSession.setViewMode(Core.settings.getInt("vrview", 0));
-        Log.info("VR: in-game view mode: @", Core.settings.getInt("vrview", 0) == 2 ? "flat full" : (Core.settings.getInt("vrview", 0) == 1 ? "flat" : "pano"));
+        VrSession.setGlobeStrength(Core.settings.getInt("vrglobe", 2));
+        Log.info("VR: in-game globe strength @", Core.settings.getInt("vrglobe", 2));
 
         String runtime = VrSession.runtimeVersion();
         Log.info("VR: Quest detected, OpenXR runtime probe: '@'", runtime);
@@ -138,7 +139,7 @@ public final class QuestVr{
         private float startedAt;
         private boolean didSelfTap, didButtonTap;
         private boolean lastInGame, lastMoveActive, linearApplied;
-        private int lastViewMode = -1;
+        private int lastViewMode = -1, lastGlobeStrength = -1;
 
         VrFrameListener(Activity activity){
             this.activity = activity;
@@ -158,10 +159,29 @@ public final class QuestVr{
         VrSession.start(activity);
             }
 
-            // The flat modes are disabled: always present the panorama (3D ship + aim ray).
+            // The flat modes are disabled: always present the panorama/globe (3D ship + aim ray).
             if(lastViewMode != 0){
                 lastViewMode = 0;
                 VrSession.setViewMode(0);
+            }
+
+            // Left Y cycles the globe curvature: small/curved -> giant/flat.
+            if(VrSession.takeViewToggle()){
+                int next = (Core.settings.getInt("vrglobe", 2) + 1) % 5;
+                Core.settings.put("vrglobe", next);
+                lastGlobeStrength = next;
+                VrSession.setGlobeStrength(next);
+                String label = new String[]{"Small globe", "Gentle globe", "Medium globe", "Large globe", "Giant globe"}[next];
+                Log.info("VR: globe strength -> @", label);
+                if(Vars.ui != null && Core.scene != null){
+                    Vars.ui.announce("VR globe: " + label);
+                }
+            }
+
+            int configuredGlobe = Core.settings.getInt("vrglobe", 2);
+            if(configuredGlobe != lastGlobeStrength){
+                lastGlobeStrength = configuredGlobe;
+                VrSession.setGlobeStrength(configuredGlobe);
             }
 
             // Apply linear filtering once the atlas is available (Quest only).

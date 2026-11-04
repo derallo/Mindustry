@@ -66,6 +66,11 @@ Java_mindustry_android_vr_VrSession_nativeSetViewMode(JNIEnv *, jclass, jint mod
     vr::setViewMode((int)mode);
 }
 
+JNIEXPORT void JNICALL
+Java_mindustry_android_vr_VrSession_nativeSetGlobeStrength(JNIEnv *, jclass, jint strength) {
+    vr::setGlobeStrength((int)strength);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_mindustry_android_vr_VrSession_nativeWorldViewActive(JNIEnv *, jclass) {
     return vr::worldViewActive() ? JNI_TRUE : JNI_FALSE;

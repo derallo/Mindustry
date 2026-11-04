@@ -254,6 +254,72 @@ inline bool rayToPano(const Pose &aim, const PanoView &pano, float &outU, float 
 }
 
 /** Capture UV -> unit direction in LOCAL space (used to anchor 3D content to the map). */
+// ---------------------------------------------------------------------------------------------
+// Globe / sphere view. The capture is mapped onto the visible front hemisphere of a sphere that
+// sits in front of the scene. The centre of the sphere faces the eye (flat at the centre); toward
+// the limb the surface turns away, so the image compresses and vanishes like a globe. `k` is the
+// sphere radius as a fraction of its distance (bigger k = a larger, flatter globe).
+// ---------------------------------------------------------------------------------------------
+struct GlobeView {
+    Vec3 center;
+    float yaw;
+    float distance;
+    float k;
+    float halfLon;   // longitude span / 2 (radians)
+    float halfLat;   // latitude span / 2 (radians)
+};
+
+inline Vec3 globeFwd(float yaw) { return Vec3{-std::sin(yaw), 0.f, -std::cos(yaw)}; }
+inline Vec3 globeRight(float yaw) { return Vec3{std::cos(yaw), 0.f, -std::sin(yaw)}; }
+
+inline bool globeProject(const Pose &eye, const GlobeView &globe, float &u, float &v) {
+    const Vec3 fwd = globeFwd(globe.yaw);
+    const Vec3 right = globeRight(globe.yaw);
+    const Vec3 up{0.f, 1.f, 0.f};
+    const Vec3 sphere{globe.center.x + fwd.x * globe.distance,
+                      globe.center.y + fwd.y * globe.distance,
+                      globe.center.z + fwd.z * globe.distance};
+    const float radius = globe.distance * globe.k;
+    const Vec3 dir = rotate(eye.orientation, Vec3{0.f, 0.f, -1.f});
+    const Vec3 oc{eye.position.x - sphere.x, eye.position.y - sphere.y, eye.position.z - sphere.z};
+    const float b = dot(oc, dir);
+    const float c = dot(oc, oc) - radius * radius;
+    const float disc = b * b - c;
+    if (disc < 0.f) return false;
+    const float t = -b - std::sqrt(disc);
+    if (t <= 0.f) return false;
+    const Vec3 point{eye.position.x + dir.x * t, eye.position.y + dir.y * t,
+                     eye.position.z + dir.z * t};
+    const Vec3 q{point.x - sphere.x, point.y - sphere.y, point.z - sphere.z};
+    // The visible hemisphere is the one facing the eye: its outward normal points back
+    // along -fwd, so the front surface has q·fwd < 0. Longitude is measured from -fwd.
+    if (dot(q, fwd) >= 0.f) return false;
+    const float lon = std::atan2(dot(q, right), -dot(q, fwd));
+    const float lat = std::asin(clampf(dot(q, up) / radius, -1.f, 1.f));
+    u = 0.5f + lon / (2.f * globe.halfLon);
+    v = 0.5f + lat / (2.f * globe.halfLat);
+    return u >= 0.f && u <= 1.f && v >= 0.f && v <= 1.f;
+}
+
+inline Vec3 globeDirection(const GlobeView &globe, float u, float v) {
+    const Vec3 fwd = globeFwd(globe.yaw);
+    const Vec3 right = globeRight(globe.yaw);
+    const Vec3 up{0.f, 1.f, 0.f};
+    const Vec3 sphere{globe.center.x + fwd.x * globe.distance,
+                      globe.center.y + fwd.y * globe.distance,
+                      globe.center.z + fwd.z * globe.distance};
+    const float radius = globe.distance * globe.k;
+    const float lon = (u - 0.5f) * 2.f * globe.halfLon;
+    const float lat = (v - 0.5f) * 2.f * globe.halfLat;
+    const float cl = std::cos(lat);
+    const Vec3 front{-fwd.x, -fwd.y, -fwd.z}; // sphere front (toward the eye)
+    const Vec3 q{(front.x * cl * std::cos(lon) + right.x * cl * std::sin(lon) + up.x * std::sin(lat)) * radius,
+                 (front.y * cl * std::cos(lon) + right.y * cl * std::sin(lon) + up.y * std::sin(lat)) * radius,
+                 (front.z * cl * std::cos(lon) + right.z * cl * std::sin(lon) + up.z * std::sin(lat)) * radius};
+    const Vec3 point{sphere.x + q.x, sphere.y + q.y, sphere.z + q.z};
+    return normalized(Vec3{point.x - globe.center.x, point.y - globe.center.y, point.z - globe.center.z});
+}
+
 inline Vec3 panoDirection(const PanoView &pano, float u, float v) {
     const float yawRel = convexUnwarp((u - 0.5f) * 2.f) * pano.spanH * 0.5f;
     const float pitch = convexUnwarp((v - 0.5f) * 2.f) * pano.spanV * 0.5f;

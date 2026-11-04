@@ -113,6 +113,23 @@ int main() {
     check(radialFade(1.f, 0.45f, 0.95f, 0.6f) < 0.5f, "fade: corners darken");
     check(radialFade(2.f, 0.45f, 0.95f, 0.6f) >= 0.f, "fade: clamps non-negative");
 
+    // Globe sphere projection: centre ray -> texture centre, off-centre ray -> edge,
+    // and the inverse direction is unit length.
+    {
+        const GlobeView globe{Vec3{0.f, 1.6f, 0.f}, 0.f, 2.f, 0.82f,
+                              (float)M_PI / 2.f, (float)M_PI * 0.3f};
+        const Pose centre{Quat{0.f, 0.f, 0.f, 1.f}, Vec3{0.f, 1.6f, 0.f}};
+        float gu = 0.f, gv = 0.f;
+        check(globeProject(centre, globe, gu, gv) && approx(gu, 0.5f, 2e-3f) &&
+              approx(gv, 0.5f, 2e-3f), "globe: centre maps to centre");
+        const float yaw30 = 30.f * (float)M_PI / 180.f;
+        const Pose right{Quat{0.f, -std::sin(yaw30 * 0.5f), 0.f, std::cos(yaw30 * 0.5f)},
+                         Vec3{0.f, 1.6f, 0.f}};
+        check(globeProject(right, globe, gu, gv) && gu > 0.5f, "globe: right ray maps right");
+        const Vec3 dir = globeDirection(globe, 0.7f, 0.6f);
+        check(std::fabs(dot(dir, dir) - 1.f) < 1e-4f, "globe: direction unit length");
+    }
+
     // 9x map panorama: the capture wrapped around a 300x180 degree cylinder (a 3x3 world
     // capture; the centre 100x60 is the normal view).
     const float spanH = 300.f * (float)M_PI / 180.f;

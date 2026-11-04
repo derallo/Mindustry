@@ -283,6 +283,14 @@ public final class VrSession{
         }
     }
 
+    /** Globe curvature 0..4 (0 small/curved, 4 giant/flat). */
+    public static void setGlobeStrength(int strength){
+        try{
+            nativeSetGlobeStrength(strength);
+        }catch(Throwable ignored){
+        }
+    }
+
     /** Called from the XR thread when the left Y button is pressed. */
     static void onVrViewToggle(){
         viewToggleRequested = true;
@@ -427,6 +435,8 @@ public final class VrSession{
     private static native void nativeSetWorldView(boolean inGame);
 
     private static native void nativeSetViewMode(int mode);
+
+    private static native void nativeSetGlobeStrength(int strength);
 
     private static native boolean nativeWorldViewActive();
 
