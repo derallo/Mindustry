@@ -48,17 +48,11 @@ public final class QuestVr{
 
         Vars.quest = true;
 
-        // The user asked for the flat screen while the convex/warp work is on hold. Default
-        // to flat for existing installs too (this overrides the test value stored earlier).
-        if(!Core.settings.getBool("vrflatdefault", false)){
-            Core.settings.put("vrview", 1);
-            Core.settings.put("vrflatdefault", true);
-        }
-        // The flat panel was a regression (dead controller input, flicker, no 3D ship).
-        // Restore the panorama projection with the 3D ship as the default presentation.
-        if(!Core.settings.getBool("vrpano3d", false)){
+        // Panorama-only baseline: the flat quad regressed controller input, flickered, and
+        // removed the 3D ship. Keep it selectable only by the developer intent extra.
+        if(!Core.settings.getBool("vrpanoonly", false)){
             Core.settings.put("vrview", 0);
-            Core.settings.put("vrpano3d", true);
+            Core.settings.put("vrpanoonly", true);
         }
 
         // Dev/test: `--ei vrview 1` launches straight into the flat screen.
@@ -162,26 +156,10 @@ public final class QuestVr{
         VrSession.start(activity);
             }
 
-            // Left Y cycles panorama <-> flat and announces the result.
-            if(VrSession.takeViewToggle()){
-                int previous = Core.settings.getInt("vrview", 0);
-                int next = (previous + 1) % 3;
-                Core.settings.put("vrview", next);
-                lastViewMode = next;
-                VrSession.setViewMode(next);
-                VrSession.requestRecenter();
-                String label = next == 2 ? "Flat full" : (next == 1 ? "Flat" : "Panorama");
-                Log.info("VR: Y toggled view to @", label);
-                if(Vars.ui != null && Core.scene != null){
-                    Vars.ui.announce("VR view: " + label);
-                }
-            }
-
-            int configuredView = Core.settings.getInt("vrview", 0);
-            if(configuredView != lastViewMode){
-                lastViewMode = configuredView;
-                VrSession.setViewMode(configuredView);
-                VrSession.requestRecenter();
+            // The flat modes are disabled: always present the panorama (3D ship + aim ray).
+            if(lastViewMode != 0){
+                lastViewMode = 0;
+                VrSession.setViewMode(0);
             }
 
             // Apply linear filtering once the atlas is available (Quest only).

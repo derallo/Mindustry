@@ -443,10 +443,6 @@ public class SettingsMenuDialog extends BaseDialog{
         if(!quest){
             graphics.checkPref("iso3d", false, val -> iso3d = val);
             graphics.checkPref("vrlookaround", false, val -> {});
-        }else{
-            // In-game presentation: the user can A/B the panorama projection and the
-            // original flat virtual screen. The left Y button cycles this live too.
-            graphics.sliderPref("vrview", 0, 0, 2, 1, v -> v == 0 ? "Panorama" : v == 1 ? "Flat 4.4m" : "Flat full");
         }
 
         graphics.sliderPref("bloomintensity", 6, 0, 16, i -> (int)(i / 4f * 100f) + "%");
