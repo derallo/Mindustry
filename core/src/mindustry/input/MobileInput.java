@@ -813,7 +813,9 @@ public class MobileInput extends InputHandler implements GestureListener{
             //move camera around
             float camSpeed = 6f;
             Vec2 delta = Tmp.v1.setZero().add(Core.input.axis(Binding.moveX), Core.input.axis(Binding.moveY)).nor().scl(Time.delta * camSpeed);
-            Core.camera.position.add(delta);
+            // On Quest the left stick moves the player unit and the camera is pinned to it;
+            // letting the stock mobile pan move the camera here caused drift/jitter.
+            if(!Vars.quest) Core.camera.position.add(delta);
             if(!delta.isZero()){
                 spectating = null;
             }
@@ -1022,7 +1024,13 @@ public class MobileInput extends InputHandler implements GestureListener{
             target = null;
         }
 
-        targetPos.set(Core.camera.position);
+        // Quest: the left thumbstick drives the unit directly (the camera is kept on the
+        // player by QuestVr), instead of the mobile camera-pan target.
+        if(Vars.vrMoveActive){
+            targetPos.set(unit.x + Vars.vrMoveX * 60f, unit.y + Vars.vrMoveY * 60f);
+        }else{
+            targetPos.set(Core.camera.position);
+        }
 
         float attractDst = 15f;
         float speed = unit.speed();

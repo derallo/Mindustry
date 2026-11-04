@@ -205,6 +205,17 @@ public class Vars implements Loadable{
     public static boolean ios;
     /** whether the game is running on an Android device */
     public static boolean android;
+    /** whether the game is running on a Meta Quest headset (OpenXR VR mode) */
+    public static boolean quest;
+    /** experimental isometric-3D world presentation (see graphics.iso.IsoRenderer) */
+    public static boolean iso3d;
+    /** Quest fullscreen panorama is the current in-game presentation (menus stay on the quad) */
+    public static boolean vrWorldView;
+    /** The Quest bridge is drawing the player's Alpha ship in native stereo; hide the sprite */
+    public static boolean vrShipModel;
+    /** Quest left-thumbstick movement, consumed by MobileInput.updateMovement */
+    public static boolean vrMoveActive;
+    public static float vrMoveX, vrMoveY;
     /** whether the game is running on a headless server */
     public static boolean headless;
     /** whether steam is enabled for this game */
@@ -508,6 +519,9 @@ public class Vars implements Loadable{
         }
 
         Binding.init();
+
+        //presentation flag is persisted; toggled from Settings > Graphics or with F10
+        iso3d = settings.getBool("iso3d", false);
 
         //https://github.com/Anuken/Mindustry/issues/8483
         if(settings.getInt("uiscale") == 5){

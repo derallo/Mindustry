@@ -31,6 +31,15 @@ android{
     namespace = "io.anuke.mindustry"
     buildToolsVersion = '36.0.0'
     compileSdk = 36
+    ndkVersion = "28.2.13676358"
+
+    externalNativeBuild{
+        cmake{
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
     sourceSets{
         main{
             manifest.srcFile 'AndroidManifest.xml'
@@ -43,7 +52,8 @@ android{
             if(localArc){
                 jniLibs.srcDirs += ['../../Arc/natives/natives-android/libs', '../../Arc/natives/natives-freetype-android/libs']
             }else{
-                jniLibs.srcDirs = ['libs']
+                // libs/ holds the libGDX/Arc natives; openxr/lib holds the vendored Khronos loader
+                jniLibs.srcDirs = ['libs', 'openxr/lib']
             }
         }
 
@@ -79,7 +89,25 @@ android{
         targetCompatibility JavaVersion.VERSION_17
     }
 
-    flavorDimensions = ["google"]
+    flavorDimensions = ["platform"]
+
+    productFlavors{
+        // default build; identical to upstream Mindustry
+        stock{
+            dimension = "platform"
+        }
+
+        // Meta Quest build: separate package, modern minSdk, arm64 only
+        quest{
+            dimension = "platform"
+            applicationIdSuffix = ".quest"
+            versionNameSuffix = "-quest"
+            minSdkVersion 29
+            ndk{
+                abiFilters "arm64-v8a"
+            }
+        }
+    }
 
     signingConfigs{
         release{

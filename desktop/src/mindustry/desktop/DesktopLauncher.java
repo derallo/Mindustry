@@ -50,6 +50,11 @@ public class DesktopLauncher extends ClientLauncher{
             check32Bit();
             checkJavaVersion();
 
+            // Dev-only isometric preview harness (see mindustry.desktop.IsoPreview).
+            if(System.getProperty("mindustry.iso.preview") != null){
+                mindustry.desktop.IsoPreview.install();
+            }
+
             new SdlApplication(new DesktopLauncher(arg), new SdlConfig(){{
                 title = "Mindustry";
                 maximized = true;

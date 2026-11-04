@@ -8,8 +8,10 @@ import android.net.*;
 import android.os.*;
 import android.os.Build.*;
 import android.telephony.*;
+import android.view.WindowManager;
 import arc.*;
 import arc.backend.android.*;
+import arc.backend.android.surfaceview.*;
 import arc.files.*;
 import arc.scene.ui.layout.*;
 import arc.struct.*;
@@ -53,6 +55,24 @@ public class AndroidLauncher extends AndroidApplication{
         super.onCreate(savedInstanceState);
         if(doubleScaleTablets && isTablet(this)){
             Scl.setAddition(0.5f);
+        }
+
+        // Keeps the headset display awake while the app is foregrounded (Android's standard
+        // mechanism; Horizon maps it onto its idle-sleep policy). Controllers still sleep on
+        // their own schedule; the VR bridge simply sees inactive input until they wake.
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        AndroidApplicationConfiguration config = new AndroidApplicationConfiguration(){{
+            useImmersiveMode = true;
+            hideStatusBar = true;
+            useGL30 = true;
+        }};
+
+        // On a headset the activity window is not what the user sees. A fixed render size
+        // keeps the texture we hand to OpenXR stable regardless of the surface Horizon OS
+        // provides, and it is the resolution of the virtual screen.
+        if(isQuestDevice()){
+            config.resolutionStrategy = new FixedResolutionStrategy(1920, 1152); // 5:3, 25% sharper VR capture
         }
 
         initialize(new ClientLauncher(){
@@ -216,11 +236,16 @@ public class AndroidLauncher extends AndroidApplication{
                 setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_USER);
             }
 
-        }, new AndroidApplicationConfiguration(){{
-            useImmersiveMode = true;
-            hideStatusBar = true;
-            useGL30 = true;
-        }});
+        }, config);
+
+        // VR bootstrap lives only in the quest flavor; the stock build has no such class.
+        try{
+            Class.forName("mindustry.android.vr.QuestVr").getMethod("init", Activity.class).invoke(null, this);
+        }catch(ClassNotFoundException ignored){
+            // stock build
+        }catch(Throwable t){
+            Log.err("Failed to initialize Quest VR support", t);
+        }
 
         var intent = getIntent();
         Events.on(ClientLoadEvent.class, u -> handleIntent(intent));
@@ -326,5 +351,14 @@ public class AndroidLauncher extends AndroidApplication{
     private boolean isTablet(Context context){
         TelephonyManager manager = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
         return manager != null && manager.getPhoneType() == TelephonyManager.PHONE_TYPE_NONE;
+    }
+
+    /** True on Meta Quest 2 / Pro / 3 / 3S hardware. */
+    public static boolean isQuestDevice(){
+        String fingerprint = (Build.MANUFACTURER + "|" + Build.MODEL + "|" + Build.DEVICE + "|" + Build.PRODUCT).toLowerCase();
+
+        // eureka = Quest 2, seacliff = Quest Pro, hollywood = Quest 3, panther = Quest 3S
+        return fingerprint.contains("oculus") || fingerprint.contains("quest") || fingerprint.contains("eureka")
+            || fingerprint.contains("seacliff") || fingerprint.contains("hollywood") || fingerprint.contains("panther");
     }
 }

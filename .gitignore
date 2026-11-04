@@ -171,3 +171,6 @@ core/assets/logicids.dat
 
 # project files for the sectors
 core/assets-raw/sprites/ui/sectors/*.json
+# Mindustry VR build artifacts
+/android/.cxx/
+/build-*.log

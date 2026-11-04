@@ -16,6 +16,9 @@ import mindustry.*;
 import mindustry.game.EventType.*;
 import mindustry.gen.*;
 import mindustry.graphics.*;
+import arc.input.KeyCode;
+import mindustry.graphics.iso.IsoCamera;
+import mindustry.graphics.iso.IsoRenderer;
 import mindustry.graphics.g3d.*;
 import mindustry.maps.*;
 import mindustry.type.*;
@@ -72,8 +75,13 @@ public class Renderer implements ApplicationListener{
     private Vec2 camShakeOffset = new Vec2();
     private int glErrors;
 
+    /** Experimental 3D presentation; used when {@link mindustry.Vars#iso3d} is enabled. */
+    public final IsoRenderer iso = new IsoRenderer();
+
     public Renderer(){
-        camera = new Camera();
+        // IsoCamera resolves screen<->world through the 3D projection when Vars.iso3d is on,
+        // and behaves exactly like the stock 2D camera otherwise.
+        camera = new IsoCamera();
         Shaders.init();
 
         Events.on(ResetEvent.class, e -> {
@@ -150,6 +158,27 @@ public class Renderer implements ApplicationListener{
 
     @Override
     public void update(){
+        // Desktop quick toggle for the experimental 3D presentation. Quest keeps iso off:
+        // the fullscreen VR panorama is the in-game presentation there.
+        if(!quest && Core.input.keyTap(KeyCode.f10) && (Core.scene == null || !Core.scene.hasField())){
+            iso3d = !iso3d;
+            Core.settings.put("iso3d", iso3d);
+            if(ui != null) ui.announce("Isometric 3D: " + (iso3d ? "on" : "off"));
+        }
+
+        // Camera angle controls for the 3D view.
+        if(iso3d && (Core.scene == null || !Core.scene.hasField())){
+            if(Core.input.keyTap(KeyCode.f9)){
+                // 90 degree steps keep the view diagonal (isometric), instead of edge-on.
+                iso.yaw = (iso.yaw + 90f) % 360f;
+                if(ui != null) ui.announce("Camera yaw: " + (int)iso.yaw + " deg");
+            }
+            if(Core.input.keyTap(KeyCode.f8)){
+                iso.pitch = iso.pitch >= 45f ? 20f : iso.pitch + 10f;
+                if(ui != null) ui.announce("Camera pitch: " + (int)iso.pitch + " deg");
+            }
+        }
+
         PerfCounter.render.begin();
         Color.white.set(1f, 1f, 1f, 1f);
 
@@ -172,6 +201,8 @@ public class Renderer implements ApplicationListener{
         drawDisplays = !settings.getBool("hidedisplays");
         maxZoomInGame = settings.getFloat("maxzoomingamemultiplier", 1) * maxZoom;
         minZoomInGame = minZoom / settings.getFloat("minzoomingamemultiplier", 1);
+        // Quest: allow a much wider zoom-out than the stock mobile limit.
+        if(quest) minZoomInGame = Math.min(minZoomInGame, 0.25f);
         drawLight = settings.getBool("drawlight", true);
         showPings = settings.getBool("showpings", true);
         showOtherBuildPlans = settings.getBool("showotherbuildplans", true);
@@ -264,6 +295,7 @@ public class Renderer implements ApplicationListener{
 
     @Override
     public void dispose(){
+        iso.dispose();
         Events.fire(new DisposeEvent());
     }
 
@@ -313,6 +345,13 @@ public class Renderer implements ApplicationListener{
 
         graphics.clear(clearColor);
         Draw.reset();
+
+        // Experimental isometric-3D pass: replaces the entire 2D world presentation.
+        // The UI is drawn separately by core.UI, so menus/HUD keep working.
+        if(iso3d && state.isGame()){
+            iso.draw();
+            return;
+        }
 
         if(animateWater || animateShields){
             effectBuffer.resize(graphics.getWidth(), graphics.getHeight());

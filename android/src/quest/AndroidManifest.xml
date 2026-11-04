@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Horizon OS / OpenXR requirements -->
+    <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="true"/>
+    <uses-feature android:name="oculus.software.handtracking" android:required="false"/>
+    <uses-feature android:name="android.hardware.gamepad" android:required="false"/>
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+
+    <!-- Khronos OpenXR loader: talk to the installed Horizon OS runtime broker. -->
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR"/>
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM"/>
+
+    <queries>
+        <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker"/>
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRRuntimeService"/>
+        </intent>
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRApiLayerService"/>
+        </intent>
+    </queries>
+
+    <!-- Horizon OS does not grant these, and Mindustry only needs them below API 29.
+         The quest flavor is minSdk 29, so they are removed entirely. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
+
+    <application>
+        <meta-data android:name="com.oculus.supportedDevices"
+                   android:value="quest2|questpro|quest3|quest3s"/>
+        <meta-data android:name="com.oculus.vr.focusaware" android:value="true"/>
+        <activity
+                android:name="mindustry.android.AndroidLauncher"
+                android:exported="true"
+                android:screenOrientation="landscape"
+                tools:replace="android:screenOrientation"
+                tools:node="merge">
+
+            <!-- Marks this activity as an immersive OpenXR application on Horizon OS. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="com.oculus.intent.category.VR"/>
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

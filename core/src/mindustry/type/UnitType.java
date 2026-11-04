@@ -1473,6 +1473,9 @@ public class UnitType extends UnlockableContent implements Senseable{
         if(unit.inFogTo(Vars.player.team())) return;
 
         boolean isPayload = !unit.isAdded();
+        // The Quest bridge draws the player's Alpha in native stereo; keep the shadow, trail,
+        // build beam and abilities, but drop the 2D body/weapons that the model replaces.
+        boolean replaced = Vars.vrShipModel && !isPayload && player != null && unit == player.unit();
 
         if(buildSpeed > 0f && !isPayload){
             unit.drawBuilding();
@@ -1535,19 +1538,23 @@ public class UnitType extends UnlockableContent implements Senseable{
             drawCrawl(c);
         }
 
-        if(drawBody) drawOutline(unit);
-        drawWeaponOutlines(unit);
+        if(!replaced){
+            if(drawBody) drawOutline(unit);
+            drawWeaponOutlines(unit);
+        }
         if(engineLayer > 0) Draw.z(engineLayer);
         if(trailLength > 0 && !naval && (unit.isFlying() || !useEngineElevation)){
             drawTrail(unit);
         }
-        if(engines.size > 0) drawEngines(unit);
+        if(!replaced && engines.size > 0) drawEngines(unit);
         Draw.z(z);
-        if(drawBody) drawBody(unit);
-        if(drawCell && !(unit instanceof Crawlc)) drawCell(unit);
-        Draw.scl(scl); //TODO this is a hack for neoplasm turrets
-        drawWeapons(unit);
-        if(drawItems) drawItems(unit);
+        if(!replaced){
+            if(drawBody) drawBody(unit);
+            if(drawCell && !(unit instanceof Crawlc)) drawCell(unit);
+            Draw.scl(scl); //TODO this is a hack for neoplasm turrets
+            drawWeapons(unit);
+            if(drawItems) drawItems(unit);
+        }
         if(!isPayload){
             drawLight(unit);
         }
@@ -1557,7 +1564,7 @@ public class UnitType extends UnlockableContent implements Senseable{
         }
 
         //TODO how/where do I draw under?
-        if(parts.size > 0){
+        if(!replaced && parts.size > 0){
             for(int i = 0; i < parts.size; i++){
                 var part = parts.get(i);
 
