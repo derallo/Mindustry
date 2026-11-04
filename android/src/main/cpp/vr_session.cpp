@@ -114,6 +114,7 @@ struct State {
     bool gripDown = false;
     bool triggerDown = false;
     int endFrameLog = 0;
+    int syncFailLog = 0;
     uint64_t submittedFrames = 0;
     uint64_t capturedFrames = 0;
     bool pendingRecenter = false;
@@ -1481,7 +1482,10 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
     XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
     syncInfo.countActiveActionSets = 1;
     syncInfo.activeActionSets = &activeActionSet;
-    xrSyncActions(g.session, &syncInfo);
+    const XrResult syncResult = xrSyncActions(g.session, &syncInfo);
+    if (XR_FAILED(syncResult) && (g.syncFailLog++ % 120) == 0) {
+        LOGW("xrSyncActions failed: %d", (int)syncResult);
+    }
 
     bool down = false;
     float stickX = 0.f, stickY = 0.f;
