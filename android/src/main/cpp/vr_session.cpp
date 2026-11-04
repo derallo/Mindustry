@@ -1633,6 +1633,23 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
         }
     }
 
+    // Head-lean movement fallback: the left stick is not being fed by this runtime,
+    // so a small lean relative to the panorama centre drives movement until it is.
+    if (moveX == 0.f && moveY == 0.f && panoMode && g.viewSpace != XR_NULL_HANDLE) {
+        XrSpaceLocation leanLoc{XR_TYPE_SPACE_LOCATION};
+        if (XR_SUCCEEDED(xrLocateSpace(g.viewSpace, g.localSpace,
+                                       frameState.predictedDisplayTime, &leanLoc)) &&
+            (leanLoc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)) {
+            const float dx = leanLoc.pose.position.x - g.panoCenter.x;
+            const float dz = leanLoc.pose.position.z - g.panoCenter.z;
+            const float cs = std::cos(-g.panoYaw), sn = std::sin(-g.panoYaw);
+            const float localX = dx * cs - dz * sn;
+            const float localZ = dx * sn + dz * cs;
+            moveX = clampf(localX / 0.14f, -1.f, 1.f);
+            moveY = clampf(localZ / 0.14f, -1.f, 1.f);
+        }
+    }
+
     notifyMove(env, moveX, moveY);
     if ((g.submittedFrames % 300) == 0) {
         LOGI("input: trigger active=%d state=%.2f | rstk active=%d %.2f,%.2f | lstk active=%d %.2f,%.2f | aim=%d",
