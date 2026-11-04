@@ -146,10 +146,10 @@ struct State {
     Vec3 panoCenter{0.f, 1.6f, 0.f};
     float panoYaw = 0.f;
     float panoRadius = 2.0f;
-    // Panorama: the capture wrapped around the fixed cylinder (the view the user preferred
-    // before the dome experiment). Flat mode is a separate quad presentation.
-    float panoSpanH = 170.f * 0.01745329252f;
-    float panoSpanV = 102.f * 0.01745329252f;
+    // 9x map panorama: the 1920x1152 capture holds a 3x3 world area (camera scale /3), so
+    // the centre third spans the normal 100x60 view and the other thirds expose real map.
+    float panoSpanH = 300.f * 0.01745329252f;
+    float panoSpanV = 180.f * 0.01745329252f;
 
     // Player unit anchor, published by Java each frame (capture UV + heading).
     std::atomic<float> playerU{0.5f}, playerV{0.5f}, playerRot{0.f}, playerZoom{1.f};

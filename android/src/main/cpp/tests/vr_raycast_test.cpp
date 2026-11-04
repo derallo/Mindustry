@@ -113,9 +113,10 @@ int main() {
     check(radialFade(1.f, 0.45f, 0.95f, 0.6f) < 0.5f, "fade: corners darken");
     check(radialFade(2.f, 0.45f, 0.95f, 0.6f) >= 0.f, "fade: clamps non-negative");
 
-    // Fullscreen panorama: the capture wrapped around the fixed 170x102 degree cylinder.
-    const float spanH = 170.f * (float)M_PI / 180.f;
-    const float spanV = 102.f * (float)M_PI / 180.f;
+    // 9x map panorama: the capture wrapped around a 300x180 degree cylinder (a 3x3 world
+    // capture; the centre 100x60 is the normal view).
+    const float spanH = 300.f * (float)M_PI / 180.f;
+    const float spanV = 180.f * (float)M_PI / 180.f;
     const PanoView pano{Vec3{0.f, 1.6f, 0.f}, 0.f, 2.f, spanH, spanV};
 
     // The warp is identity in panorama mode (reserved for a future dome mode).
@@ -137,8 +138,8 @@ int main() {
     check(rayToPano(panoUpRay, pano, u, v), "pano: up ray hits");
     check(v > 0.5f, "pano: up ray maps to v > 0.5");
 
-    // Outside the capture's angular span (170 wide, so 100 deg still misses).
-    Pose farRight{yaw(-100.f * (float)M_PI / 180.f), Vec3{0.f, 1.6f, 0.f}};
+    // Outside the capture's angular span (300 wide, so 160 deg still misses).
+    Pose farRight{yaw(-160.f * (float)M_PI / 180.f), Vec3{0.f, 1.6f, 0.f}};
     check(!rayToPano(farRight, pano, u, v), "pano: beyond span misses");
 
     // Ray pointing away from the map misses even though it leaves the cylinder.

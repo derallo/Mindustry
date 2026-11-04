@@ -61,9 +61,11 @@ public final class QuestVr{
             Log.info("VR: intent view mode @", Core.settings.getInt("vrview", 0));
         }
 
-        // Let the camera zoom out much further than the stock mobile limit.
+        // 9x map: render a 3x3 world area. The camera is 3x wider, so the pano's centre
+        // third is the normal-scale view and the surrounding thirds hold actual extra map.
         if(Vars.renderer != null){
             Vars.renderer.minZoomInGame = 0.25f;
+            Vars.renderer.setScale(Vars.renderer.getScale() / 3f);
             Vars.renderer.clampScale();
         }
 
