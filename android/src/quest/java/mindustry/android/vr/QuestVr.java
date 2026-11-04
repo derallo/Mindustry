@@ -60,6 +60,11 @@ public final class QuestVr{
             Core.settings.put("vrview", activity.getIntent().getIntExtra("vrview", 0));
             Log.info("VR: intent view mode @", Core.settings.getInt("vrview", 0));
         }
+        // Dev/test: `--ei vrglobe 0..4` launches at a fixed curvature for screenshots.
+        if(activity.getIntent() != null && activity.getIntent().hasExtra("vrglobe")){
+            Core.settings.put("vrglobe", activity.getIntent().getIntExtra("vrglobe", 2));
+            Log.info("VR: intent globe strength @", Core.settings.getInt("vrglobe", 2));
+        }
 
         // 9x map: render a 3x3 world area. The camera is 3x wider, so the pano's centre
         // third is the normal-scale view and the surrounding thirds hold actual extra map.
