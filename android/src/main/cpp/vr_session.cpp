@@ -1500,7 +1500,7 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
                                 location.pose.orientation.z, location.pose.orientation.w},
                            Vec3{location.pose.position.x, location.pose.position.y,
                                 location.pose.position.z}};
-            globeProject(aim, globe, u, v);
+            globeProjectAssist(aim, globe, u, v);
         } else {
             rayToScreen(location.pose, u, v);
         }

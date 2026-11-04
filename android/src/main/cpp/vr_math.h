@@ -301,6 +301,32 @@ inline bool globeProject(const Pose &eye, const GlobeView &globe, float &u, floa
     return u >= 0.f && u <= 1.f && v >= 0.f && v <= 1.f;
 }
 
+/** Aim-assist variant: if the ray misses the sphere, intersect the flat plane at the
+ *  globe's front instead, so the controller cursor still maps onto the visible globe. */
+inline bool globeProjectAssist(const Pose &eye, const GlobeView &globe, float &u, float &v) {
+    if (globeProject(eye, globe, u, v)) return true;
+    const Vec3 fwd = globeFwd(globe.yaw);
+    const Vec3 right = globeRight(globe.yaw);
+    const Vec3 up{0.f, 1.f, 0.f};
+    const Vec3 front{globe.center.x + fwd.x * (globe.distance - globe.distance * globe.k),
+                     globe.center.y + fwd.y * (globe.distance - globe.distance * globe.k),
+                     globe.center.z + fwd.z * (globe.distance - globe.distance * globe.k)};
+    const Vec3 dir = rotate(eye.orientation, Vec3{0.f, 0.f, -1.f});
+    const float denom = dot(dir, fwd);
+    if (std::fabs(denom) < 1e-4f) return false;
+    const float t = dot(Vec3{front.x - eye.position.x, front.y - eye.position.y, front.z - eye.position.z}, fwd) / denom;
+    if (t <= 0.f) return false;
+    const Vec3 hit{eye.position.x + dir.x * t, eye.position.y + dir.y * t, eye.position.z + dir.z * t};
+    const Vec3 local{hit.x - front.x, hit.y - front.y, hit.z - front.z};
+    const float planeHalfW = (globe.distance * globe.k) * std::tan(globe.halfLon);
+    const float planeHalfH = (globe.distance * globe.k) * std::tan(globe.halfLat);
+    const float px = dot(local, right) / planeHalfW * 0.5f;
+    const float py = dot(local, up) / planeHalfH * 0.5f;
+    u = 0.5f + px;
+    v = 0.5f + py;
+    return u >= 0.f && u <= 1.f && v >= 0.f && v <= 1.f;
+}
+
 inline Vec3 globeDirection(const GlobeView &globe, float u, float v) {
     const Vec3 fwd = globeFwd(globe.yaw);
     const Vec3 right = globeRight(globe.yaw);
