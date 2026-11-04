@@ -87,8 +87,8 @@ public final class QuestVr{
         VrSession.setLookAround(Core.settings.getBool("vrlookaround", false));
         Log.info("VR: quad look-around: @", Core.settings.getBool("vrlookaround", false));
         VrSession.setViewMode(Core.settings.getInt("vrview", 0));
-        VrSession.setGlobeStrength(Core.settings.getInt("vrglobe", 2));
-        Log.info("VR: in-game globe strength @", Core.settings.getInt("vrglobe", 2));
+        VrSession.setGlobeStrength(Core.settings.getInt("vrglobe", 3));
+        Log.info("VR: in-game globe strength @", Core.settings.getInt("vrglobe", 3));
 
         String runtime = VrSession.runtimeVersion();
         Log.info("VR: Quest detected, OpenXR runtime probe: '@'", runtime);
@@ -101,6 +101,18 @@ public final class QuestVr{
         if(activity.getIntent() != null && activity.getIntent().getBooleanExtra("sandbox", false)){
             Events.on(ClientLoadEvent.class, e -> Core.app.post(QuestVr::startSandbox));
             Log.info("VR: sandbox intent registered");
+        }
+        // Dev/test: `--ez settings true` opens the settings dialog so the flat-menu path
+        // (dialog -> flat quad, controller aim -> screen) can be exercised.
+        if(activity.getIntent() != null && activity.getIntent().getBooleanExtra("settings", false)){
+            Events.on(ClientLoadEvent.class, e -> Core.app.post(() -> {
+                try{
+                    if(Vars.ui != null) Vars.ui.settings.show();
+                }catch(Throwable t){
+                    Log.err("VR: settings intent failed", t);
+                }
+            }));
+            Log.info("VR: settings intent registered");
         }
     }
 
@@ -164,15 +176,19 @@ public final class QuestVr{
         VrSession.start(activity);
             }
 
-            // The flat modes are disabled: always present the panorama/globe (3D ship + aim ray).
-            if(lastViewMode != 0){
-                lastViewMode = 0;
-                VrSession.setViewMode(0);
+            // World uses the globe; dialogs/menus stay on the flat quad so their UI is
+            // readable and the controller aim still maps to a normal screen.
+            boolean menuOpen = Core.scene != null && Core.scene.hasDialog();
+            int desiredView = menuOpen ? 2 : 0;
+            if(lastViewMode != desiredView){
+                lastViewMode = desiredView;
+                VrSession.setViewMode(desiredView);
+                VrSession.requestRecenter();
             }
 
             // Left Y cycles the globe curvature: small/curved -> giant/flat.
             if(VrSession.takeViewToggle()){
-                int next = (Core.settings.getInt("vrglobe", 2) + 1) % 5;
+                int next = (Core.settings.getInt("vrglobe", 3) + 1) % 5;
                 Core.settings.put("vrglobe", next);
                 lastGlobeStrength = next;
                 VrSession.setGlobeStrength(next);
@@ -183,7 +199,7 @@ public final class QuestVr{
                 }
             }
 
-            int configuredGlobe = Core.settings.getInt("vrglobe", 2);
+            int configuredGlobe = Core.settings.getInt("vrglobe", 3);
             if(configuredGlobe != lastGlobeStrength){
                 lastGlobeStrength = configuredGlobe;
                 VrSession.setGlobeStrength(configuredGlobe);

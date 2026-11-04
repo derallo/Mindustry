@@ -1204,7 +1204,7 @@ void drawPano(int eye, const XrView &view, int captureBuffer) {
     // Texture covers the visible disk's angular radius, so the centre scale stays the
     // same as curvature changes; only the limb curvature/vanishing changes.
     const float disk = std::asin(clampf(globeR / globeD, 0.f, 1.f));
-    glUniform2f(g.panoGlobeHalf, disk, disk * 0.6f);
+    glUniform2f(g.panoGlobeHalf, disk, disk); // full disk latitude: rounded top/bottom too
     glUniform4f(g.panoFade, 0.010f, 0.055f, 0.62f, 1.02f);
     glBindVertexArray(g.fullscreenVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -1226,7 +1226,7 @@ void drawShip(int eye, const XrView &view) {
     const float disk = std::asin(clampf(globeRadiusFor(globeStrength) / globeD, 0.f, 1.f));
     const GlobeView globe{g.panoCenter, g.panoYaw, globeD,
                           globeRadiusFor(globeStrength) / globeD,
-                          disk, disk * 0.6f};
+                          disk, disk};
     const Vec3 dir = globeDirection(globe, pu, pv);
 
     // Put the ship in front of the cylinder so it gains real stereo disparity against the map.
@@ -1495,7 +1495,7 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
             const float disk = std::asin(clampf(globeRadiusFor(globeStrength) / globeD, 0.f, 1.f));
             const GlobeView globe{g.panoCenter, g.panoYaw, globeD,
                                   globeRadiusFor(globeStrength) / globeD,
-                                  disk, disk * 0.6f};
+                                  disk, disk};
             const Pose aim{Quat{location.pose.orientation.x, location.pose.orientation.y,
                                 location.pose.orientation.z, location.pose.orientation.w},
                            Vec3{location.pose.position.x, location.pose.position.y,

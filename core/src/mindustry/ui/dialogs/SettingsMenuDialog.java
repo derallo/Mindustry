@@ -444,7 +444,7 @@ public class SettingsMenuDialog extends BaseDialog{
             graphics.checkPref("iso3d", false, val -> iso3d = val);
             graphics.checkPref("vrlookaround", false, val -> {});
         }else{
-            graphics.sliderPref("vrglobe", 2, 0, 4, 1,
+            graphics.sliderPref("vrglobe", 3, 0, 4, 1,
                     v -> new String[]{"Small", "Gentle", "Medium", "Large", "Giant"}[v]);
         }
 
