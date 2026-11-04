@@ -501,40 +501,48 @@ bool createActions() {
         return p;
     };
 
-    // Suggest all core bindings in ONE call (the spec-canonical form). Splitting them
-    // into one call per binding left runtimes free to keep only some of them, which is
-    // how aim/trigger/stick silently died while the buttons kept working. The haptic
-    // output stays separate: it is the one path runtimes commonly reject, and losing
-    // it must not take the inputs down with it.
-    XrActionSuggestedBinding coreBindings[] = {
-            {g.aimAction, path("/user/hand/right/input/aim/pose")},
-            {g.triggerAction, path("/user/hand/right/input/trigger/value")},
-            {g.stickAction, path("/user/hand/right/input/thumbstick")},
-            {g.gripAction, path("/user/hand/right/input/squeeze/value")},
-            {g.moveStickAction, path("/user/hand/left/input/thumbstick")},
-            {g.clickAction, path("/user/hand/right/input/a/click")},
-            {g.clickAction, path("/user/hand/left/input/x/click")},
-            {g.viewToggleAction, path("/user/hand/left/input/y/click")},
+    // Suggest each binding separately. Batching them into a single call made every
+    // action go dead on the Quest runtime (suggest still returned success), while
+    // one-call-per-binding is the form that demonstrably fed the buttons. Keep this
+    // shape; do not "clean it up" into one call again.
+    struct BindingDef {
+        XrAction action;
+        const char *path;
     };
-    XrInteractionProfileSuggestedBinding coreSuggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
-    coreSuggested.interactionProfile = profile;
-    coreSuggested.countSuggestedBindings = (uint32_t)(sizeof(coreBindings) / sizeof(coreBindings[0]));
-    coreSuggested.suggestedBindings = coreBindings;
-    if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &coreSuggested))) {
-        LOGW("core controller bindings rejected; aim/trigger/stick/click may not be fed");
-    } else {
-        LOGI("core controller bindings accepted (aim/trigger/sticks/click/viewtoggle)");
+    BindingDef mainBindings[] = {
+            {g.aimAction, "/user/hand/right/input/aim/pose"},
+            {g.triggerAction, "/user/hand/right/input/trigger/value"},
+            {g.stickAction, "/user/hand/right/input/thumbstick"},
+            {g.gripAction, "/user/hand/right/input/squeeze/value"},
+            {g.hapticAction, "/user/hand/right/output/haptic"},
+            {g.moveStickAction, "/user/hand/left/input/thumbstick"},
+            {g.clickAction, "/user/hand/right/input/a/click"},
+            {g.clickAction, "/user/hand/left/input/x/click"},
+    };
+    for (const auto &b : mainBindings) {
+        XrActionSuggestedBinding binding{b.action, path(b.path)};
+        XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+        suggested.interactionProfile = profile;
+        suggested.countSuggestedBindings = 1;
+        suggested.suggestedBindings = &binding;
+        if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &suggested))) {
+            LOGW("binding rejected: %s", b.path);
+        } else {
+            LOGI("binding accepted: %s", b.path);
+        }
     }
 
-    XrActionSuggestedBinding hapticBinding[] = {
-            {g.hapticAction, path("/user/hand/right/output/haptic")},
+    // Left Y cycles the globe curvature. Suggested separately (its own call, as with
+    // every binding above).
+    XrActionSuggestedBinding viewBinding[] = {
+            {g.viewToggleAction, path("/user/hand/left/input/y/click")},
     };
-    XrInteractionProfileSuggestedBinding hapticSuggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
-    hapticSuggested.interactionProfile = profile;
-    hapticSuggested.countSuggestedBindings = 1;
-    hapticSuggested.suggestedBindings = hapticBinding;
-    if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &hapticSuggested))) {
-        LOGW("haptic binding rejected; continuing without controller haptics");
+    XrInteractionProfileSuggestedBinding viewSuggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    viewSuggested.interactionProfile = profile;
+    viewSuggested.countSuggestedBindings = 1;
+    viewSuggested.suggestedBindings = viewBinding;
+    if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &viewSuggested))) {
+        LOGW("left Y view-toggle binding rejected");
     }
 
     XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
@@ -1525,7 +1533,18 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
     static bool aimWasLocated = false;
     bool aimLocated = false;
     XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
-    if (XR_SUCCEEDED(xrLocateSpace(g.aimSpace, g.localSpace, frameState.predictedDisplayTime, &location)) &&
+    const XrResult aimResult = xrLocateSpace(g.aimSpace, g.localSpace,
+                                             frameState.predictedDisplayTime, &location);
+    if ((g.submittedFrames % 300) == 0 && XR_FAILED(aimResult)) {
+        LOGI("aim locate failing: XrResult %d", (int)aimResult);
+    } else if ((g.submittedFrames % 300) == 0 && aimResult == XR_SUCCESS &&
+               (location.locationFlags & (XR_SPACE_LOCATION_POSITION_VALID_BIT |
+                                          XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) !=
+                       (XR_SPACE_LOCATION_POSITION_VALID_BIT |
+                        XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+        LOGI("aim locate flags incomplete: 0x%llx", (unsigned long long)location.locationFlags);
+    }
+    if (XR_SUCCEEDED(aimResult) &&
         (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
         (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
         aimLocated = true;
