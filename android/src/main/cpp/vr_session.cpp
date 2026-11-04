@@ -1478,10 +1478,16 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
         recenter(env, frameState.predictedDisplayTime);
     }
 
-    XrActiveActionSet activeActionSet{g.actionSet, XR_NULL_PATH};
+    // Activate the set for both hands explicitly. XR_NULL_PATH (all paths) worked
+    // for the left Y boolean but left the float/vector/pose actions inactive on the
+    // Quest runtime, so the trigger, sticks and aim never produced values.
+    XrActiveActionSet activeSets[2] = {
+            {g.actionSet, g.handPath},
+            {g.actionSet, g.leftHandPath},
+    };
     XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
-    syncInfo.countActiveActionSets = 1;
-    syncInfo.activeActionSets = &activeActionSet;
+    syncInfo.countActiveActionSets = 2;
+    syncInfo.activeActionSets = activeSets;
     const XrResult syncResult = xrSyncActions(g.session, &syncInfo);
     if (XR_FAILED(syncResult) && (g.syncFailLog++ % 120) == 0) {
         LOGW("xrSyncActions failed: %d", (int)syncResult);
