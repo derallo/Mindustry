@@ -202,7 +202,7 @@ static constexpr float globeFront = 1.0f; // fixed eye-to-front distance (metres
 static float globeRadiusFor(int strength) {
     // Curvature is the sphere radius; the front distance stays fixed so the centre does
     // not zoom as the curvature changes. 0 = small/curved, 4 = giant/flat.
-    static const float values[] = {0.25f, 0.50f, 0.90f, 1.40f, 2.20f};
+    static const float values[] = {0.25f, 0.60f, 1.50f, 3.00f, 5.70f};
     return values[strength < 0 ? 0 : (strength > 4 ? 4 : strength)];
 }
 
@@ -1201,7 +1201,10 @@ void drawPano(int eye, const XrView &view, int captureBuffer) {
     const float globeD = globeDistanceFor(globeStrength);
     glUniform1f(g.panoGlobeK, globeR / globeD);
     glUniform1f(g.panoGlobeD, globeD);
-    glUniform2f(g.panoGlobeHalf, 1.57079632679f, 0.94247779607f); // 90 x 54 deg texture coverage
+    // Texture covers the visible disk's angular radius, so the centre scale stays the
+    // same as curvature changes; only the limb curvature/vanishing changes.
+    const float disk = std::asin(clampf(globeR / globeD, 0.f, 1.f));
+    glUniform2f(g.panoGlobeHalf, disk, disk * 0.6f);
     glUniform4f(g.panoFade, 0.010f, 0.055f, 0.62f, 1.02f);
     glBindVertexArray(g.fullscreenVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -1220,9 +1223,10 @@ void drawShip(int eye, const XrView &view) {
     const float pv = clampf(g.playerV.load(), 0.f, 1.f);
     const int globeStrength = g.globeStrength.load();
     const float globeD = globeDistanceFor(globeStrength);
+    const float disk = std::asin(clampf(globeRadiusFor(globeStrength) / globeD, 0.f, 1.f));
     const GlobeView globe{g.panoCenter, g.panoYaw, globeD,
                           globeRadiusFor(globeStrength) / globeD,
-                          1.57079632679f, 0.94247779607f};
+                          disk, disk * 0.6f};
     const Vec3 dir = globeDirection(globe, pu, pv);
 
     // Put the ship in front of the cylinder so it gains real stereo disparity against the map.
@@ -1488,9 +1492,10 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
         if (panoMode) {
             const int globeStrength = g.globeStrength.load();
             const float globeD = globeDistanceFor(globeStrength);
+            const float disk = std::asin(clampf(globeRadiusFor(globeStrength) / globeD, 0.f, 1.f));
             const GlobeView globe{g.panoCenter, g.panoYaw, globeD,
                                   globeRadiusFor(globeStrength) / globeD,
-                                  1.57079632679f, 0.94247779607f};
+                                  disk, disk * 0.6f};
             const Pose aim{Quat{location.pose.orientation.x, location.pose.orientation.y,
                                 location.pose.orientation.z, location.pose.orientation.w},
                            Vec3{location.pose.position.x, location.pose.position.y,
