@@ -1674,7 +1674,11 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
 
     XrActionStateBoolean clickState{XR_TYPE_ACTION_STATE_BOOLEAN};
     getInfo.action = g.clickAction;
-    if (XR_SUCCEEDED(xrGetActionStateBoolean(g.session, &getInfo, &clickState)) && clickState.currentState == XR_TRUE) {
+    // The click action has no subaction paths, so query it with XR_NULL_PATH. Leaving the
+    // left-hand path from the stick read here made the right A button query the wrong path.
+    getInfo.subactionPath = XR_NULL_PATH;
+    if (XR_SUCCEEDED(xrGetActionStateBoolean(g.session, &getInfo, &clickState)) &&
+        clickState.currentState == XR_TRUE) {
         down = true;
     }
 
