@@ -272,6 +272,16 @@ struct GlobeView {
 inline Vec3 globeFwd(float yaw) { return Vec3{-std::sin(yaw), 0.f, -std::cos(yaw)}; }
 inline Vec3 globeRight(float yaw) { return Vec3{std::cos(yaw), 0.f, -std::sin(yaw)}; }
 
+/**
+ * Angular half-spans for the capture on the globe. Longitude spans the full visible disk
+ * (asin(radius/distance)) so the capture edge lands at the limb; latitude is scaled by the
+ * capture aspect (height/width) so map features are not stretched vertically.
+ */
+inline void globeAngles(float radius, float distance, float aspect, float &halfLon, float &halfLat) {
+    halfLon = std::asin(clampf(radius / distance, 0.f, 1.f));
+    halfLat = halfLon * aspect;
+}
+
 inline bool globeProject(const Pose &eye, const GlobeView &globe, float &u, float &v) {
     const Vec3 fwd = globeFwd(globe.yaw);
     const Vec3 right = globeRight(globe.yaw);

@@ -265,6 +265,61 @@ int main() {
     check(rayToPano(aimed, pano, au, av), "pano: aimed ray hits");
     check(approx(au, 0.68f, 2e-3f) && approx(av, 0.56f, 2e-3f), "pano: aimed ray maps to target UV");
 
+    // ---- planet globe (orbit view): aspect-correct spans, wide disk, round-trips --------
+    {
+        // Default strength (Large): R=6.5 m, front=1.5 m -> D=8.0 m, capture 5:3.
+        float halfLon = 0.f, halfLat = 0.f;
+        globeAngles(6.5f, 8.0f, 0.6f, halfLon, halfLat);
+        check(approx(halfLon, std::asin(6.5f / 8.0f), 1e-6f), "globeAngles: lon spans the disk");
+        check(approx(halfLat, halfLon * 0.6f, 1e-6f), "globeAngles: lat keeps capture aspect");
+        check(halfLon > 0.85f && halfLon < 1.05f, "globeAngles: disk is wide (~106 deg), not a small ball");
+
+        const GlobeView planet{Vec3{0.f, 1.6f, 0.f}, 0.f, 8.0f, 6.5f / 8.0f, halfLon, halfLat};
+        auto poseAlong = [](const Vec3 &dir, const Vec3 &origin) {
+            const float yawA = std::atan2(-dir.x, -dir.z);
+            const float pitchA = std::asin(clampf(dir.y, -1.f, 1.f));
+            const Quat yq = yaw(yawA), pq = pitch(pitchA);
+            // orientation = yaw * pitch (pitch applied first)
+            return Pose{Quat{yq.w * pq.x + yq.x * pq.w + yq.y * pq.z - yq.z * pq.y,
+                             yq.w * pq.y - yq.x * pq.z + yq.y * pq.w + yq.z * pq.x,
+                             yq.w * pq.z + yq.x * pq.y - yq.y * pq.x + yq.z * pq.w,
+                             yq.w * pq.w - yq.x * pq.x - yq.y * pq.y - yq.z * pq.z},
+                        origin};
+        };
+
+        // Centre / right / up rays land at centre / right / up of the capture.
+        float pu = -1.f, pv = -1.f;
+        check(globeProject(poseAlong(Vec3{0.f, 0.f, -1.f}, planet.center), planet, pu, pv) &&
+              approx(pu, 0.5f, 2e-3f) && approx(pv, 0.5f, 2e-3f), "planet: centre ray -> capture centre");
+        check(globeProject(poseAlong(normalized(Vec3{0.45f, 0.f, -1.f}), planet.center), planet, pu, pv) &&
+              pu > 0.55f && approx(pv, 0.5f, 3e-3f), "planet: right ray -> right of centre");
+        check(globeProject(poseAlong(normalized(Vec3{0.f, 0.45f, -1.f}), planet.center), planet, pu, pv) &&
+              pv > 0.55f && approx(pu, 0.5f, 3e-3f), "planet: up ray -> above centre");
+
+        // UV -> direction -> UV round-trips (ship anchor + aim must agree with the shader).
+        for (float tu : {0.5f, 0.25f, 0.78f}) {
+            for (float tv : {0.5f, 0.3f, 0.72f}) {
+                const Vec3 dir = globeDirection(planet, tu, tv);
+                float ru = -1.f, rv = -1.f;
+                check(globeProject(poseAlong(dir, planet.center), planet, ru, rv),
+                      "planet: round-trip ray hits");
+                check(approx(ru, tu, 2e-3f) && approx(rv, tv, 2e-3f), "planet: UV round-trip");
+            }
+        }
+
+        // Head offset (lean) shifts the sample: real parallax, canvas itself stays pinned.
+        check(globeProject(poseAlong(Vec3{0.f, 0.f, -1.f}, Vec3{0.2f, 1.6f, 0.f}), planet, pu, pv) &&
+              pu > 0.5f, "planet: offset eye samples off-centre (parallax)");
+
+        // Aim assist: centre still maps to centre; a beyond-limb ray stays clickable.
+        check(globeProjectAssist(poseAlong(Vec3{0.f, 0.f, -1.f}, planet.center), planet, pu, pv) &&
+              approx(pu, 0.5f, 2e-3f) && approx(pv, 0.5f, 2e-3f), "planet assist: centre -> centre");
+        const float yaw80 = 80.f * (float)M_PI / 180.f;
+        check(globeProjectAssist(poseAlong(Vec3{-std::sin(-yaw80), 0.f, -std::cos(-yaw80)}, planet.center),
+                                 planet, pu, pv) && pu > 0.9f,
+              "planet assist: beyond-limb ray clamps near the edge");
+    }
+
     std::printf(failures == 0 ? "\nALL TESTS PASSED\n" : "\n%d TEST(S) FAILED\n", failures);
     return failures == 0 ? 0 : 1;
 }

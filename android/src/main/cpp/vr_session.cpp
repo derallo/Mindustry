@@ -199,12 +199,14 @@ struct State {
     std::vector<unsigned char> readbackPixels;
 };
 
-static constexpr float globeFront = 1.0f; // fixed eye-to-front distance (metres)
+static constexpr float globeFront = 1.5f; // fixed eye-to-front distance (metres)
 
 static float globeRadiusFor(int strength) {
     // Curvature is the sphere radius; the front distance stays fixed so the centre does
-    // not zoom as the curvature changes. 0 = small/curved, 4 = giant/flat.
-    static const float values[] = {0.30f, 0.90f, 2.50f, 6.00f, 14.0f};
+    // not zoom as the curvature changes. 0 = small/curved, 4 = giant/flat. The disk
+    // (2*asin(R/(R+front))) spans ~73..118 degrees: a planet that fills the view with
+    // black space at the corners, never a zoomed-in wall.
+    static const float values[] = {2.20f, 3.20f, 4.60f, 6.50f, 9.00f};
     return values[strength < 0 ? 0 : (strength > 4 ? 4 : strength)];
 }
 
@@ -213,6 +215,17 @@ static float globeDistanceFor(int strength) {
 }
 
 State g;
+
+/** Globe for the current frame (render, ship anchor and controller aim must agree). */
+static GlobeView currentGlobe() {
+    const int strength = g.globeStrength.load();
+    const float radius = globeRadiusFor(strength);
+    const float distance = globeDistanceFor(strength);
+    const float aspect = g.texW > 0 ? (float)g.texH / (float)g.texW : 0.6f;
+    float halfLon = 0.f, halfLat = 0.f;
+    globeAngles(radius, distance, aspect, halfLon, halfLat);
+    return GlobeView{g.panoCenter, g.panoYaw, distance, radius / distance, halfLon, halfLat};
+}
 
 /** Local copy of the "last error" string, safe to read from any thread. */
 char errorBuf[256] = "not initialized";
@@ -488,47 +501,40 @@ bool createActions() {
         return p;
     };
 
-    // Suggest each binding separately. A single rejected path (often the haptic output)
-    // used to invalidate the whole array, which left only the separately-suggested Y
-    // working. Individual calls keep the aim/trigger/stick alive even if one path fails.
-    struct BindingDef {
-        XrAction action;
-        const char *path;
-    };
-    BindingDef mainBindings[] = {
-            {g.aimAction, "/user/hand/right/input/aim/pose"},
-            {g.triggerAction, "/user/hand/right/input/trigger/value"},
-            {g.stickAction, "/user/hand/right/input/thumbstick"},
-            {g.gripAction, "/user/hand/right/input/squeeze/value"},
-            {g.hapticAction, "/user/hand/right/output/haptic"},
-            {g.moveStickAction, "/user/hand/left/input/thumbstick"},
-            {g.clickAction, "/user/hand/right/input/a/click"},
-            {g.clickAction, "/user/hand/left/input/x/click"},
-    };
-    for (const auto &b : mainBindings) {
-        XrActionSuggestedBinding binding{b.action, path(b.path)};
-        XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
-        suggested.interactionProfile = profile;
-        suggested.countSuggestedBindings = 1;
-        suggested.suggestedBindings = &binding;
-        if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &suggested))) {
-            LOGW("binding rejected: %s", b.path);
-        } else {
-            LOGI("binding accepted: %s", b.path);
-        }
-    }
-
-    // Optional: left Y cycles the VR view. Suggested separately so a runtime that rejects
-    // this one path does not invalidate the aim/trigger/stick bindings above.
-    XrActionSuggestedBinding viewBinding[] = {
+    // Suggest all core bindings in ONE call (the spec-canonical form). Splitting them
+    // into one call per binding left runtimes free to keep only some of them, which is
+    // how aim/trigger/stick silently died while the buttons kept working. The haptic
+    // output stays separate: it is the one path runtimes commonly reject, and losing
+    // it must not take the inputs down with it.
+    XrActionSuggestedBinding coreBindings[] = {
+            {g.aimAction, path("/user/hand/right/input/aim/pose")},
+            {g.triggerAction, path("/user/hand/right/input/trigger/value")},
+            {g.stickAction, path("/user/hand/right/input/thumbstick")},
+            {g.gripAction, path("/user/hand/right/input/squeeze/value")},
+            {g.moveStickAction, path("/user/hand/left/input/thumbstick")},
+            {g.clickAction, path("/user/hand/right/input/a/click")},
+            {g.clickAction, path("/user/hand/left/input/x/click")},
             {g.viewToggleAction, path("/user/hand/left/input/y/click")},
     };
-    XrInteractionProfileSuggestedBinding viewSuggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
-    viewSuggested.interactionProfile = profile;
-    viewSuggested.countSuggestedBindings = 1;
-    viewSuggested.suggestedBindings = viewBinding;
-    if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &viewSuggested))) {
-        LOGW("left Y view-toggle binding rejected; use Settings > Graphics > VR View");
+    XrInteractionProfileSuggestedBinding coreSuggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    coreSuggested.interactionProfile = profile;
+    coreSuggested.countSuggestedBindings = (uint32_t)(sizeof(coreBindings) / sizeof(coreBindings[0]));
+    coreSuggested.suggestedBindings = coreBindings;
+    if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &coreSuggested))) {
+        LOGW("core controller bindings rejected; aim/trigger/stick/click may not be fed");
+    } else {
+        LOGI("core controller bindings accepted (aim/trigger/sticks/click/viewtoggle)");
+    }
+
+    XrActionSuggestedBinding hapticBinding[] = {
+            {g.hapticAction, path("/user/hand/right/output/haptic")},
+    };
+    XrInteractionProfileSuggestedBinding hapticSuggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    hapticSuggested.interactionProfile = profile;
+    hapticSuggested.countSuggestedBindings = 1;
+    hapticSuggested.suggestedBindings = hapticBinding;
+    if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &hapticSuggested))) {
+        LOGW("haptic binding rejected; continuing without controller haptics");
     }
 
     XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
@@ -926,9 +932,13 @@ bool ensurePanoProgram() {
         "        float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));\n"
         "        float edgeFade = smoothstep(uFade.x, uFade.y, edge);\n"
         "        vec3 tex = texture(uTex, clamp(uv, vec2(0.002), vec2(0.998))).rgb;\n"
+        // Planet-from-orbit limb: the surface normal turns away from the eye toward
+        // the limb, so the outer disk desaturates and fades into space.
+        "        float facing = clamp(dot(normalize(q), -dir), 0.0, 1.0);\n"
+        "        float limb = smoothstep(0.0, 0.55, facing);\n"
         "        float lum = dot(tex, vec3(0.299, 0.587, 0.114));\n"
-        "        tex = mix(vec3(lum), tex, 1.0 - 0.25 * (1.0 - edgeFade));\n"
-        "        col = tex * edgeFade;\n"
+        "        tex = mix(vec3(lum), tex, 0.30 + 0.70 * limb);\n"
+        "        col = tex * edgeFade * limb;\n"
         "      }\n"
         "    }\n"
         "  }\n"
@@ -1219,16 +1229,13 @@ void drawPano(int eye, const XrView &view, int captureBuffer) {
     glUniform3f(g.panoRefRight, std::cos(g.panoYaw), 0.f, -std::sin(g.panoYaw));
     glUniform3f(g.panoRefFwd, -std::sin(g.panoYaw), 0.f, -std::cos(g.panoYaw));
     glUniform1f(g.panoRadiusLoc, g.panoRadius);
-    const int globeStrength = g.globeStrength.load();
-    const float globeR = globeRadiusFor(globeStrength);
-    const float globeD = globeDistanceFor(globeStrength);
-    glUniform1f(g.panoGlobeK, globeR / globeD);
-    glUniform1f(g.panoGlobeD, globeD);
-    // Texture covers the visible disk's angular radius, so the centre scale stays the
-    // same as curvature changes; only the limb curvature/vanishing changes.
-    const float disk = std::asin(clampf(globeR / globeD, 0.f, 1.f));
-    glUniform2f(g.panoGlobeHalf, disk, disk); // full disk latitude: rounded top/bottom too
-    glUniform4f(g.panoFade, 0.010f, 0.055f, 0.62f, 1.02f);
+    const GlobeView globe = currentGlobe();
+    glUniform1f(g.panoGlobeK, globe.k);
+    glUniform1f(g.panoGlobeD, globe.distance);
+    // Longitude covers the visible disk (capture edge at the limb); latitude is
+    // aspect-scaled so the map is not stretched, with the poles fading into space.
+    glUniform2f(g.panoGlobeHalf, globe.halfLon, globe.halfLat);
+    glUniform4f(g.panoFade, 0.0f, 0.12f, 0.62f, 1.02f);
     glBindVertexArray(g.fullscreenVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
@@ -1244,16 +1251,11 @@ void drawShip(int eye, const XrView &view) {
 
     const float pu = clampf(g.playerU.load(), 0.f, 1.f);
     const float pv = clampf(g.playerV.load(), 0.f, 1.f);
-    const int globeStrength = g.globeStrength.load();
-    const float globeD = globeDistanceFor(globeStrength);
-    const float disk = std::asin(clampf(globeRadiusFor(globeStrength) / globeD, 0.f, 1.f));
-    const GlobeView globe{g.panoCenter, g.panoYaw, globeD,
-                          globeRadiusFor(globeStrength) / globeD,
-                          disk, disk};
+    const GlobeView globe = currentGlobe();
     const Vec3 dir = globeDirection(globe, pu, pv);
 
-    // Put the ship in front of the cylinder so it gains real stereo disparity against the map.
-    const float dist = g.panoRadius * 0.82f;
+    // Float the ship just off the globe's front surface for real stereo disparity.
+    const float dist = globeFront + 0.15f;
 
     // 3/4 hero view of the Alpha. The nose starts facing the viewer (the pose users liked)
     // and yaws with the stick/travel heading, so movement visibly turns the 3D model.
@@ -1517,17 +1519,18 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
 
     const bool panoMode = g.viewMode.load() == 0 && g.worldView.load() && g.projReady && g.panoRefValid;
 
+    // Point-and-click comes from the controller aim ray only. The head is the user's
+    // viewpoint: it must never drive the cursor, zoom or movement (that made the
+    // canvas swim with every head motion).
+    static bool aimWasLocated = false;
+    bool aimLocated = false;
     XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
     if (XR_SUCCEEDED(xrLocateSpace(g.aimSpace, g.localSpace, frameState.predictedDisplayTime, &location)) &&
         (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
         (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+        aimLocated = true;
         if (panoMode) {
-            const int globeStrength = g.globeStrength.load();
-            const float globeD = globeDistanceFor(globeStrength);
-            const float disk = std::asin(clampf(globeRadiusFor(globeStrength) / globeD, 0.f, 1.f));
-            const GlobeView globe{g.panoCenter, g.panoYaw, globeD,
-                                  globeRadiusFor(globeStrength) / globeD,
-                                  disk, disk};
+            const GlobeView globe = currentGlobe();
             const Pose aim{Quat{location.pose.orientation.x, location.pose.orientation.y,
                                 location.pose.orientation.z, location.pose.orientation.w},
                            Vec3{location.pose.position.x, location.pose.position.y,
@@ -1536,6 +1539,10 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
         } else {
             rayToScreen(location.pose, u, v);
         }
+    }
+    if (aimLocated != aimWasLocated) {
+        aimWasLocated = aimLocated;
+        LOGI("controller aim %s", aimLocated ? "located" : "lost");
     }
 
     XrActionStateFloat trigger{XR_TYPE_ACTION_STATE_FLOAT};
@@ -1561,20 +1568,6 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
     if (XR_SUCCEEDED(xrGetActionStateVector2f(g.session, &getInfo, &stick))) {
         stickX = stick.currentState.x;
         stickY = stick.currentState.y;
-    }
-
-    // Head-pitch zoom fallback: the right stick is not being fed by this runtime.
-    // Pitch relative to the recenter reference drives zoom until the stick reports.
-    if (stickX == 0.f && stickY == 0.f && g.lookRefValid && g.viewSpace != XR_NULL_HANDLE) {
-        XrSpaceLocation pitchLoc{XR_TYPE_SPACE_LOCATION};
-        if (XR_SUCCEEDED(xrLocateSpace(g.viewSpace, g.localSpace,
-                                       frameState.predictedDisplayTime, &pitchLoc)) &&
-            (pitchLoc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
-            const Quat hq{pitchLoc.pose.orientation.x, pitchLoc.pose.orientation.y,
-                          pitchLoc.pose.orientation.z, pitchLoc.pose.orientation.w};
-            const Vec3 fwd = rotate(hq, Vec3{0.f, 0.f, -1.f});
-            stickY = clampf((std::asin(clampf(fwd.y, -1.f, 1.f)) - g.refPitch) / 0.45f, -1.f, 1.f);
-        }
     }
 
     // Short haptic tick on the trigger edge, so taps have physical feedback.
@@ -1614,72 +1607,30 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
         moveX = moveStick.currentState.x;
         moveY = moveStick.currentState.y;
     }
-    // Head-gaze fallback: if the aim/trigger actions are not fed (this runtime returns
-    // zero for float/vector/pose), aim with the head so the game is still clickable.
-    if (u < 0.f && g.viewSpace != XR_NULL_HANDLE) {
-        XrSpaceLocation headLoc{XR_TYPE_SPACE_LOCATION};
-        if (XR_SUCCEEDED(xrLocateSpace(g.viewSpace, g.localSpace,
-                                       frameState.predictedDisplayTime, &headLoc)) &&
-            (headLoc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
-            (headLoc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
-            if (panoMode) {
-                const int globeStrength = g.globeStrength.load();
-                const float globeR = globeRadiusFor(globeStrength);
-                const float globeD = globeDistanceFor(globeStrength);
-                const float globeDisk = std::asin(clampf(globeR / globeD, 0.f, 1.f));
-                const float fwdX = -std::sin(g.panoYaw), fwdZ = -std::cos(g.panoYaw);
-                ScreenPose gazeScreen;
-                gazeScreen.orientation = Quat{0.f, std::sin(g.panoYaw * 0.5f), 0.f,
-                                              std::cos(g.panoYaw * 0.5f)};
-                gazeScreen.position = Vec3{g.panoCenter.x + fwdX * (globeD - globeR), g.panoCenter.y,
-                                           g.panoCenter.z + fwdZ * (globeD - globeR)};
-                gazeScreen.width = 2.f * globeR * std::tan(globeDisk);
-                gazeScreen.height = gazeScreen.width * 0.6f;
-                const vr::Pose gazePose{
-                        vr::Quat{headLoc.pose.orientation.x, headLoc.pose.orientation.y,
-                                 headLoc.pose.orientation.z, headLoc.pose.orientation.w},
-                        vr::Vec3{headLoc.pose.position.x, headLoc.pose.position.y,
-                                 headLoc.pose.position.z}};
-                vr::rayToScreen(gazePose, gazeScreen, u, v);
-            } else {
-                rayToScreen(headLoc.pose, u, v);
-            }
-        }
+    // A/X click (boolean fallback for the analog trigger). The action has no subaction
+    // paths, so it is queried with XR_NULL_PATH and ORs both hands' buttons.
+    static bool clickWasDown = false;
+    XrActionStateBoolean clickState{XR_TYPE_ACTION_STATE_BOOLEAN};
+    getInfo.action = g.clickAction;
+    getInfo.subactionPath = XR_NULL_PATH;
+    bool clickDown = false;
+    if (XR_SUCCEEDED(xrGetActionStateBoolean(g.session, &getInfo, &clickState))) {
+        clickDown = clickState.currentState == XR_TRUE;
+        if (clickDown) down = true;
     }
-
-    // Head-lean movement fallback: the left stick is not being fed by this runtime,
-    // so a small lean relative to the panorama centre drives movement until it is.
-    if (moveX == 0.f && moveY == 0.f && panoMode && g.viewSpace != XR_NULL_HANDLE) {
-        XrSpaceLocation leanLoc{XR_TYPE_SPACE_LOCATION};
-        if (XR_SUCCEEDED(xrLocateSpace(g.viewSpace, g.localSpace,
-                                       frameState.predictedDisplayTime, &leanLoc)) &&
-            (leanLoc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)) {
-            const float dx = leanLoc.pose.position.x - g.panoCenter.x;
-            const float dz = leanLoc.pose.position.z - g.panoCenter.z;
-            const float cs = std::cos(-g.panoYaw), sn = std::sin(-g.panoYaw);
-            const float localX = dx * cs - dz * sn;
-            const float localZ = dx * sn + dz * cs;
-            moveX = clampf(localX / 0.14f, -1.f, 1.f);
-            moveY = clampf(localZ / 0.14f, -1.f, 1.f);
-        }
+    if (clickDown != clickWasDown) {
+        clickWasDown = clickDown;
+        LOGI("click (A/X) %s (active=%d)", clickDown ? "down" : "up", (int)clickState.isActive);
     }
 
     notifyMove(env, moveX, moveY);
     if ((g.submittedFrames % 300) == 0) {
-        LOGI("input: trigger active=%d state=%.2f | rstk active=%d %.2f,%.2f | lstk active=%d %.2f,%.2f | aim=%d",
-             (int)trigger.isActive, trigger.currentState, (int)stick.isActive,
+        LOGI("input: aimLocated=%d uv=%.2f,%.2f | trigger active=%d state=%.2f | click active=%d state=%d"
+             " | rstk active=%d %.2f,%.2f | lstk active=%d %.2f,%.2f",
+             (int)aimLocated, u, v, (int)trigger.isActive, trigger.currentState,
+             (int)clickState.isActive, (int)clickDown, (int)stick.isActive,
              stick.currentState.x, stick.currentState.y, (int)moveStick.isActive,
-             moveStick.currentState.x, moveStick.currentState.y, (int)u >= 0);
-    }
-
-    XrActionStateBoolean clickState{XR_TYPE_ACTION_STATE_BOOLEAN};
-    getInfo.action = g.clickAction;
-    // The click action has no subaction paths, so query it with XR_NULL_PATH. Leaving the
-    // left-hand path from the stick read here made the right A button query the wrong path.
-    getInfo.subactionPath = XR_NULL_PATH;
-    if (XR_SUCCEEDED(xrGetActionStateBoolean(g.session, &getInfo, &clickState)) &&
-        clickState.currentState == XR_TRUE) {
-        down = true;
+             moveStick.currentState.x, moveStick.currentState.y);
     }
 
     XrActionStateBoolean viewState{XR_TYPE_ACTION_STATE_BOOLEAN};

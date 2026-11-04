@@ -66,13 +66,8 @@ public final class QuestVr{
             Log.info("VR: intent globe strength @", Core.settings.getInt("vrglobe", 2));
         }
 
-        // 9x map: render a 3x3 world area. The camera is 3x wider, so the pano's centre
-        // third is the normal-scale view and the surrounding thirds hold actual extra map.
-        if(Vars.renderer != null){
-            Vars.renderer.minZoomInGame = 0.25f;
-            Vars.renderer.setScale(Vars.renderer.getScale() / 3f);
-            Vars.renderer.clampScale();
-        }
+        // Wide camera (3x3 world area) is applied by the frame listener on the game
+        // thread, the first frame the renderer exists; see VrFrameListener.update().
 
         // The user explicitly asked to keep the isometric graphics mode off. The in-game VR
         // presentation is the fullscreen panorama/projection path instead; the iso renderer
@@ -155,7 +150,7 @@ public final class QuestVr{
         private int retries;
         private float startedAt;
         private boolean didSelfTap, didButtonTap;
-        private boolean lastInGame, lastMoveActive, linearApplied;
+        private boolean lastInGame, lastMoveActive, linearApplied, wideApplied;
         private int lastViewMode = -1, lastGlobeStrength = -1;
 
         VrFrameListener(Activity activity){
@@ -176,14 +171,26 @@ public final class QuestVr{
         VrSession.start(activity);
             }
 
+            // Wide camera (3x3 world area) so the globe shows real extra map around the
+            // normal-scale centre. Applied here, on the game thread, the first time the
+            // renderer exists; doing it only in init() raced renderer creation and the
+            // view stayed zoomed in.
+            if(!wideApplied && Vars.renderer != null){
+                wideApplied = true;
+                Vars.renderer.setScale(Vars.renderer.getScale() / 3f);
+                Vars.renderer.clampScale();
+                Log.info("VR: wide camera applied (scale @)", Vars.renderer.getScale());
+            }
+
             // World uses the globe; dialogs/menus stay on the flat quad so their UI is
-            // readable and the controller aim still maps to a normal screen.
+            // readable and the controller aim still maps to a normal screen. Switching
+            // layers must NOT recenter: the canvas is world-pinned and only moves on
+            // grip/session-focus resume, never because a dialog opened or the head moved.
             boolean menuOpen = (Core.scene != null && Core.scene.hasDialog()) || (Vars.state != null && Vars.state.isMenu());
             int desiredView = menuOpen ? 2 : 0;
             if(lastViewMode != desiredView){
                 lastViewMode = desiredView;
                 VrSession.setViewMode(desiredView);
-                VrSession.requestRecenter();
             }
 
             // Left Y cycles the globe curvature: small/curved -> giant/flat.
@@ -387,7 +394,7 @@ public final class QuestVr{
                 lastInGame = inGame;
                 Log.info("VR: in-game fullscreen view @", inGame ? "on" : "off");
                 if(inGame && Vars.ui != null && Core.scene != null){
-                    Vars.ui.announce("Flat full   Y: flat/panorama   Left stick: move   Right stick: zoom");
+                    Vars.ui.announce("Globe view   Trigger/A: click   Left stick: move   Right stick: zoom   Y: globe size   Grip: recenter");
                 }
             }
         }
