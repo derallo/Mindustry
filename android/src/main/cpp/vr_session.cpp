@@ -477,22 +477,32 @@ bool createActions() {
         return p;
     };
 
-    XrActionSuggestedBinding bindings[] = {
-            {g.aimAction, path("/user/hand/right/input/aim/pose")},
-            {g.triggerAction, path("/user/hand/right/input/trigger/value")},
-            {g.stickAction, path("/user/hand/right/input/thumbstick")},
-            {g.gripAction, path("/user/hand/right/input/squeeze/value")},
-            {g.hapticAction, path("/user/hand/right/output/haptic")},
-            {g.moveStickAction, path("/user/hand/left/input/thumbstick")},
+    // Suggest each binding separately. A single rejected path (often the haptic output)
+    // used to invalidate the whole array, which left only the separately-suggested Y
+    // working. Individual calls keep the aim/trigger/stick alive even if one path fails.
+    struct BindingDef {
+        XrAction action;
+        const char *path;
     };
-
-    XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
-    suggested.interactionProfile = profile;
-    suggested.countSuggestedBindings = sizeof(bindings) / sizeof(bindings[0]);
-    suggested.suggestedBindings = bindings;
-    // Not fatal: a runtime may support the session without this particular profile.
-    if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &suggested))) {
-        LOGW("Oculus Touch bindings were rejected; controller input will be unavailable");
+    BindingDef mainBindings[] = {
+            {g.aimAction, "/user/hand/right/input/aim/pose"},
+            {g.triggerAction, "/user/hand/right/input/trigger/value"},
+            {g.stickAction, "/user/hand/right/input/thumbstick"},
+            {g.gripAction, "/user/hand/right/input/squeeze/value"},
+            {g.hapticAction, "/user/hand/right/output/haptic"},
+            {g.moveStickAction, "/user/hand/left/input/thumbstick"},
+    };
+    for (const auto &b : mainBindings) {
+        XrActionSuggestedBinding binding{b.action, path(b.path)};
+        XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+        suggested.interactionProfile = profile;
+        suggested.countSuggestedBindings = 1;
+        suggested.suggestedBindings = &binding;
+        if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &suggested))) {
+            LOGW("binding rejected: %s", b.path);
+        } else {
+            LOGI("binding accepted: %s", b.path);
+        }
     }
 
     // Optional: left Y cycles the VR view. Suggested separately so a runtime that rejects
