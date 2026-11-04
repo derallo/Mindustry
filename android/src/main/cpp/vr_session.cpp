@@ -1523,7 +1523,9 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
     XrActionStateFloat trigger{XR_TYPE_ACTION_STATE_FLOAT};
     getInfo.action = g.triggerAction;
     getInfo.subactionPath = g.handPath;
-    if (XR_SUCCEEDED(xrGetActionStateFloat(g.session, &getInfo, &trigger)) && trigger.isActive) {
+    if (XR_SUCCEEDED(xrGetActionStateFloat(g.session, &getInfo, &trigger))) {
+        // Some runtimes leave isActive false at rest even with valid bindings; the
+        // currentState is still meaningful once the action set is synced.
         down = trigger.currentState > 0.5f;
         if (!g.loggedTriggerActive) {
             g.loggedTriggerActive = true;
@@ -1538,7 +1540,7 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
     XrActionStateVector2f stick{XR_TYPE_ACTION_STATE_VECTOR2F};
     getInfo.action = g.stickAction;
     getInfo.subactionPath = g.handPath;
-    if (XR_SUCCEEDED(xrGetActionStateVector2f(g.session, &getInfo, &stick)) && stick.isActive) {
+    if (XR_SUCCEEDED(xrGetActionStateVector2f(g.session, &getInfo, &stick))) {
         stickX = stick.currentState.x;
         stickY = stick.currentState.y;
     }
@@ -1563,7 +1565,7 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
     getInfo.action = g.gripAction;
     getInfo.subactionPath = g.handPath;
     bool gripNow = false;
-    if(XR_SUCCEEDED(xrGetActionStateFloat(g.session, &getInfo, &grip)) && grip.isActive){
+    if(XR_SUCCEEDED(xrGetActionStateFloat(g.session, &getInfo, &grip))){
         gripNow = grip.currentState > 0.5f;
     }
     if(gripNow && !g.gripDown){
@@ -1576,7 +1578,7 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
     getInfo.action = g.moveStickAction;
     getInfo.subactionPath = g.leftHandPath;
     float moveX = 0.f, moveY = 0.f;
-    if (XR_SUCCEEDED(xrGetActionStateVector2f(g.session, &getInfo, &moveStick)) && moveStick.isActive) {
+    if (XR_SUCCEEDED(xrGetActionStateVector2f(g.session, &getInfo, &moveStick))) {
         moveX = moveStick.currentState.x;
         moveY = moveStick.currentState.y;
     }
@@ -1591,7 +1593,7 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
     XrActionStateBoolean viewState{XR_TYPE_ACTION_STATE_BOOLEAN};
     getInfo.action = g.viewToggleAction;
     getInfo.subactionPath = g.leftHandPath;
-    if (XR_SUCCEEDED(xrGetActionStateBoolean(g.session, &getInfo, &viewState)) && viewState.isActive) {
+    if (XR_SUCCEEDED(xrGetActionStateBoolean(g.session, &getInfo, &viewState))) {
         const bool now = viewState.currentState == XR_TRUE;
         if (now && !g.viewToggleDown) notifyViewToggle(env);
         g.viewToggleDown = now;
