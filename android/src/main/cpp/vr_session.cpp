@@ -197,10 +197,17 @@ struct State {
     std::vector<unsigned char> readbackPixels;
 };
 
-static float globeKFor(int strength) {
-    // 0 = small/curved globe, 4 = giant/flat globe. Values are radius/distance.
-    static const float values[] = {0.55f, 0.70f, 0.82f, 0.92f, 0.985f};
+static constexpr float globeFront = 1.0f; // fixed eye-to-front distance (metres)
+
+static float globeRadiusFor(int strength) {
+    // Curvature is the sphere radius; the front distance stays fixed so the centre does
+    // not zoom as the curvature changes. 0 = small/curved, 4 = giant/flat.
+    static const float values[] = {0.25f, 0.50f, 0.90f, 1.40f, 2.20f};
     return values[strength < 0 ? 0 : (strength > 4 ? 4 : strength)];
+}
+
+static float globeDistanceFor(int strength) {
+    return globeFront + globeRadiusFor(strength);
 }
 
 State g;
@@ -1189,9 +1196,11 @@ void drawPano(int eye, const XrView &view, int captureBuffer) {
     glUniform3f(g.panoRefRight, std::cos(g.panoYaw), 0.f, -std::sin(g.panoYaw));
     glUniform3f(g.panoRefFwd, -std::sin(g.panoYaw), 0.f, -std::cos(g.panoYaw));
     glUniform1f(g.panoRadiusLoc, g.panoRadius);
-    const float globeK = globeKFor(g.globeStrength.load());
-    glUniform1f(g.panoGlobeK, globeK);
-    glUniform1f(g.panoGlobeD, g.globeDistance);
+    const int globeStrength = g.globeStrength.load();
+    const float globeR = globeRadiusFor(globeStrength);
+    const float globeD = globeDistanceFor(globeStrength);
+    glUniform1f(g.panoGlobeK, globeR / globeD);
+    glUniform1f(g.panoGlobeD, globeD);
     glUniform2f(g.panoGlobeHalf, 1.57079632679f, 0.94247779607f); // 90 x 54 deg texture coverage
     glUniform4f(g.panoFade, 0.010f, 0.055f, 0.62f, 1.02f);
     glBindVertexArray(g.fullscreenVao);
@@ -1209,8 +1218,10 @@ void drawShip(int eye, const XrView &view) {
 
     const float pu = clampf(g.playerU.load(), 0.f, 1.f);
     const float pv = clampf(g.playerV.load(), 0.f, 1.f);
-    const GlobeView globe{g.panoCenter, g.panoYaw, g.globeDistance,
-                          globeKFor(g.globeStrength.load()),
+    const int globeStrength = g.globeStrength.load();
+    const float globeD = globeDistanceFor(globeStrength);
+    const GlobeView globe{g.panoCenter, g.panoYaw, globeD,
+                          globeRadiusFor(globeStrength) / globeD,
                           1.57079632679f, 0.94247779607f};
     const Vec3 dir = globeDirection(globe, pu, pv);
 
@@ -1475,8 +1486,10 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
         (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
         (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
         if (panoMode) {
-            const GlobeView globe{g.panoCenter, g.panoYaw, g.globeDistance,
-                                  globeKFor(g.globeStrength.load()),
+            const int globeStrength = g.globeStrength.load();
+            const float globeD = globeDistanceFor(globeStrength);
+            const GlobeView globe{g.panoCenter, g.panoYaw, globeD,
+                                  globeRadiusFor(globeStrength) / globeD,
                                   1.57079632679f, 0.94247779607f};
             const Pose aim{Quat{location.pose.orientation.x, location.pose.orientation.y,
                                 location.pose.orientation.z, location.pose.orientation.w},
@@ -1837,7 +1850,9 @@ void setLookAround(bool enabled) { g.lookAround.store(enabled); }
 void setGlobeStrength(int strength) {
     const int clamped = strength < 0 ? 0 : (strength > 4 ? 4 : strength);
     g.globeStrength.store(clamped);
-    LOGI("globe strength -> %d (radius/distance %.3f)", clamped, globeKFor(clamped));
+    const float radius = globeRadiusFor(clamped);
+    LOGI("globe strength -> %d (radius %.2f m, front %.2f m, radius/distance %.3f)",
+         clamped, radius, globeFront, radius / (globeFront + radius));
 }
 
 void setViewMode(int mode) {
