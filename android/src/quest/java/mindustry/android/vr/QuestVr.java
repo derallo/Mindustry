@@ -175,7 +175,7 @@ public final class QuestVr{
             // normal-scale centre. Applied here, on the game thread, the first time the
             // renderer exists; doing it only in init() raced renderer creation and the
             // view stayed zoomed in.
-            if(!wideApplied && Vars.renderer != null){
+            if(!wideApplied && Vars.renderer != null && Vars.control != null && Vars.control.input != null){
                 wideApplied = true;
                 Vars.renderer.setScale(Vars.renderer.getScale() / 3f);
                 Vars.renderer.clampScale();
