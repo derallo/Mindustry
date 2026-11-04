@@ -204,7 +204,7 @@ static constexpr float globeFront = 1.0f; // fixed eye-to-front distance (metres
 static float globeRadiusFor(int strength) {
     // Curvature is the sphere radius; the front distance stays fixed so the centre does
     // not zoom as the curvature changes. 0 = small/curved, 4 = giant/flat.
-    static const float values[] = {0.25f, 0.60f, 1.50f, 3.00f, 5.70f};
+    static const float values[] = {0.30f, 0.90f, 2.50f, 6.00f, 14.0f};
     return values[strength < 0 ? 0 : (strength > 4 ? 4 : strength)];
 }
 
