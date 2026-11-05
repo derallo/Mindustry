@@ -513,8 +513,15 @@ bool createActions() {
         XRCHECK(xrCreateActionSpace(g.session, &spaceInfo, &g.gripSpace[h]));
     }
 
-    XrPath profile = XR_NULL_PATH;
-    XRCHECK(xrStringToPath(g.instance, "/interaction_profiles/oculus/touch_controller", &profile));
+    // Two profiles: the legacy Oculus Touch profile and Meta's Touch Plus profile
+    // (Quest 3). The component paths are identical; only the profile differs. The
+    // runtime picks whichever matches the physical controllers, so suggest both.
+    XrPath profiles[2] = {XR_NULL_PATH, XR_NULL_PATH};
+    const char *profileNames[2] = {"/interaction_profiles/oculus/touch_controller",
+                                   "/interaction_profiles/meta/touch_controller_plus"};
+    for (int i = 0; i < 2; i++) {
+        xrStringToPath(g.instance, profileNames[i], &profiles[i]);
+    }
 
     auto path = [](const char *s) {
         XrPath p = XR_NULL_PATH;
@@ -522,10 +529,10 @@ bool createActions() {
         return p;
     };
 
-    // Suggest each binding separately. Batching them into a single call made every
-    // action go dead on the Quest runtime (suggest still returned success), while
-    // one-call-per-binding is the form that demonstrably fed the buttons. Keep this
-    // shape; do not "clean it up" into one call again.
+    // Suggest each binding separately, per profile. Batching them into a single call
+    // made every action go dead on the Quest runtime (suggest still returned
+    // success), while one-call-per-binding is the form that demonstrably fed the
+    // buttons. Keep this shape; do not "clean it up" into one call again.
     struct BindingDef {
         XrAction action;
         const char *path;
@@ -544,31 +551,24 @@ bool createActions() {
             {g.moveStickAction, "/user/hand/left/input/thumbstick"},
             {g.clickAction, "/user/hand/right/input/a/click"},
             {g.clickAction, "/user/hand/left/input/x/click"},
+            {g.viewToggleAction, "/user/hand/left/input/y/click"},
     };
-    for (const auto &b : mainBindings) {
-        XrActionSuggestedBinding binding{b.action, path(b.path)};
-        XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
-        suggested.interactionProfile = profile;
-        suggested.countSuggestedBindings = 1;
-        suggested.suggestedBindings = &binding;
-        if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &suggested))) {
-            LOGW("binding rejected: %s", b.path);
-        } else {
-            LOGI("binding accepted: %s", b.path);
+    for (int p = 0; p < 2; p++) {
+        int accepted = 0;
+        for (const auto &b : mainBindings) {
+            XrActionSuggestedBinding binding{b.action, path(b.path)};
+            XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+            suggested.interactionProfile = profiles[p];
+            suggested.countSuggestedBindings = 1;
+            suggested.suggestedBindings = &binding;
+            if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &suggested))) {
+                LOGW("binding rejected (%s): %s", profileNames[p], b.path);
+            } else {
+                accepted++;
+            }
         }
-    }
-
-    // Left Y cycles the globe curvature. Suggested separately (its own call, as with
-    // every binding above).
-    XrActionSuggestedBinding viewBinding[] = {
-            {g.viewToggleAction, path("/user/hand/left/input/y/click")},
-    };
-    XrInteractionProfileSuggestedBinding viewSuggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
-    viewSuggested.interactionProfile = profile;
-    viewSuggested.countSuggestedBindings = 1;
-    viewSuggested.suggestedBindings = viewBinding;
-    if (XR_FAILED(xrSuggestInteractionProfileBindings(g.instance, &viewSuggested))) {
-        LOGW("left Y view-toggle binding rejected");
+        LOGI("profile %s: %d/%d bindings accepted", profileNames[p], accepted,
+             (int)(sizeof(mainBindings) / sizeof(mainBindings[0])));
     }
 
     XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
@@ -626,7 +626,7 @@ bool createSession() {
     info.applicationInfo.engineVersion = 1;
     info.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
 
-    const char *extensions[] = {
+    std::vector<const char *> extensions = {
             XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME,
             XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME,
     };
@@ -639,9 +639,19 @@ bool createSession() {
         setError("OpenXR runtime is missing %s", extensions[1]);
         return false;
     }
+    // Quest 3's Touch Plus controllers live behind Meta's own interaction profile.
+    // Without this extension enabled, the runtime never selects a controller profile
+    // for this app (xrGetCurrentInteractionProfile reports "(none)" on both hands),
+    // so every action stays inactive no matter how the bindings are suggested.
+    if (checkExtension("XR_META_touch_controller_plus")) {
+        extensions.push_back("XR_META_touch_controller_plus");
+        LOGI("XR_META_touch_controller_plus available; enabling Touch Plus profile");
+    } else {
+        LOGW("XR_META_touch_controller_plus not offered by this runtime");
+    }
 
-    info.enabledExtensionCount = 2;
-    info.enabledExtensionNames = extensions;
+    info.enabledExtensionCount = (uint32_t)extensions.size();
+    info.enabledExtensionNames = extensions.data();
 
     XRCHECK(xrCreateInstance(&info, &g.instance));
     LOGI("OpenXR instance created");
