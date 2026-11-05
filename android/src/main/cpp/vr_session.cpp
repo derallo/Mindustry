@@ -1515,6 +1515,26 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
         LOGW("xrSyncActions failed: %d", (int)syncResult);
     }
 
+    // Which interaction profile does the runtime think each hand is using? XR_NULL_PATH
+    // means it sees no controller there at all (hand-tracking mode / unpaired / asleep),
+    // which no binding change can fix; a real profile with inactive actions means the
+    // bindings themselves are not resolving.
+    if ((g.submittedFrames % 300) == 0) {
+        for (int h = 0; h < 2; h++) {
+            XrInteractionProfileState prof{XR_TYPE_INTERACTION_PROFILE_STATE};
+            const XrResult pr = xrGetCurrentInteractionProfile(
+                    g.session, h == 0 ? g.handPath : g.leftHandPath, &prof);
+            char buf[96] = "?";
+            if (XR_SUCCEEDED(pr) && prof.interactionProfile != XR_NULL_PATH) {
+                uint32_t len = 0;
+                xrPathToString(g.instance, prof.interactionProfile, sizeof(buf), &len, buf);
+            } else if (XR_SUCCEEDED(pr)) {
+                snprintf(buf, sizeof(buf), "(none)");
+            }
+            LOGI("profile[%s]: result=%d %s", h == 0 ? "right" : "left", (int)pr, buf);
+        }
+    }
+
     bool down = false;
     float stickX = 0.f, stickY = 0.f;
     float u = -1.f, v = -1.f;
