@@ -95,7 +95,11 @@ struct State {
     XrAction clickAction = XR_NULL_HANDLE;
     bool viewToggleDown = false;
     XrAction hapticAction = XR_NULL_HANDLE;
-    XrSpace aimSpace = XR_NULL_HANDLE;
+    XrAction gripPoseAction = XR_NULL_HANDLE;
+    // [0] = right, [1] = left. Either controller can be the pointer: a single dead,
+    // asleep or unpaired hand must not take point-and-click down with it.
+    XrSpace aimSpace[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
+    XrSpace gripSpace[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
 
     XrSessionState sessionState = XR_SESSION_STATE_UNKNOWN;
     // Written on the XR thread, read from Java; atomic for visibility.
@@ -435,9 +439,12 @@ bool createActions() {
     XRCHECK(xrStringToPath(g.instance, "/user/hand/left", &leftPath));
     g.leftHandPath = leftPath;
 
+    // Aim/trigger/grip-pose live on BOTH hands: either controller can point and
+    // click. (Previously right-hand only, so one untracked hand = no pointer at all.)
+    XrPath bothPaths[2] = {handPath, leftPath};
     XrActionCreateInfo actionInfo{XR_TYPE_ACTION_CREATE_INFO};
-    actionInfo.countSubactionPaths = 1;
-    actionInfo.subactionPaths = &handPath;
+    actionInfo.countSubactionPaths = 2;
+    actionInfo.subactionPaths = bothPaths;
 
     strncpy(actionInfo.actionName, "aim", XR_MAX_ACTION_NAME_SIZE - 1);
     strncpy(actionInfo.localizedActionName, "Aim", XR_MAX_LOCALIZED_ACTION_NAME_SIZE - 1);
@@ -449,6 +456,21 @@ bool createActions() {
     actionInfo.actionType = XR_ACTION_TYPE_FLOAT_INPUT;
     XRCHECK(xrCreateAction(g.actionSet, &actionInfo, &g.triggerAction));
 
+    // Grip pose: the pose the runtime itself uses to render the controller. If the
+    // aim pose is not fed but the controller is tracked, this still locates.
+    strncpy(actionInfo.actionName, "grippose", XR_MAX_ACTION_NAME_SIZE - 1);
+    strncpy(actionInfo.localizedActionName, "Grip Pose", XR_MAX_LOCALIZED_ACTION_NAME_SIZE - 1);
+    actionInfo.actionType = XR_ACTION_TYPE_POSE_INPUT;
+    XRCHECK(xrCreateAction(g.actionSet, &actionInfo, &g.gripPoseAction));
+
+    strncpy(actionInfo.actionName, "grip", XR_MAX_ACTION_NAME_SIZE - 1);
+    strncpy(actionInfo.localizedActionName, "Grip", XR_MAX_LOCALIZED_ACTION_NAME_SIZE - 1);
+    actionInfo.actionType = XR_ACTION_TYPE_FLOAT_INPUT;
+    XRCHECK(xrCreateAction(g.actionSet, &actionInfo, &g.gripAction));
+
+    actionInfo.countSubactionPaths = 1;
+    actionInfo.subactionPaths = &handPath;
+
     strncpy(actionInfo.actionName, "thumbstick", XR_MAX_ACTION_NAME_SIZE - 1);
     strncpy(actionInfo.localizedActionName, "Thumbstick", XR_MAX_LOCALIZED_ACTION_NAME_SIZE - 1);
     actionInfo.actionType = XR_ACTION_TYPE_VECTOR2F_INPUT;
@@ -458,11 +480,6 @@ bool createActions() {
     strncpy(actionInfo.localizedActionName, "Haptic", XR_MAX_LOCALIZED_ACTION_NAME_SIZE - 1);
     actionInfo.actionType = XR_ACTION_TYPE_VIBRATION_OUTPUT;
     XRCHECK(xrCreateAction(g.actionSet, &actionInfo, &g.hapticAction));
-
-    strncpy(actionInfo.actionName, "grip", XR_MAX_ACTION_NAME_SIZE - 1);
-    strncpy(actionInfo.localizedActionName, "Grip", XR_MAX_LOCALIZED_ACTION_NAME_SIZE - 1);
-    actionInfo.actionType = XR_ACTION_TYPE_FLOAT_INPUT;
-    XRCHECK(xrCreateAction(g.actionSet, &actionInfo, &g.gripAction));
 
     // Left thumbstick: movement (the right stick stays camera zoom).
     actionInfo.countSubactionPaths = 1;
@@ -486,11 +503,15 @@ bool createActions() {
     actionInfo.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
     XRCHECK(xrCreateAction(g.actionSet, &actionInfo, &g.clickAction));
 
-    XrActionSpaceCreateInfo spaceInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
-    spaceInfo.action = g.aimAction;
-    spaceInfo.subactionPath = handPath;
-    spaceInfo.poseInActionSpace.orientation.w = 1.f;
-    XRCHECK(xrCreateActionSpace(g.session, &spaceInfo, &g.aimSpace));
+    for (int h = 0; h < 2; h++) {
+        XrActionSpaceCreateInfo spaceInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+        spaceInfo.action = g.aimAction;
+        spaceInfo.subactionPath = bothPaths[h];
+        spaceInfo.poseInActionSpace.orientation.w = 1.f;
+        XRCHECK(xrCreateActionSpace(g.session, &spaceInfo, &g.aimSpace[h]));
+        spaceInfo.action = g.gripPoseAction;
+        XRCHECK(xrCreateActionSpace(g.session, &spaceInfo, &g.gripSpace[h]));
+    }
 
     XrPath profile = XR_NULL_PATH;
     XRCHECK(xrStringToPath(g.instance, "/interaction_profiles/oculus/touch_controller", &profile));
@@ -511,9 +532,14 @@ bool createActions() {
     };
     BindingDef mainBindings[] = {
             {g.aimAction, "/user/hand/right/input/aim/pose"},
+            {g.aimAction, "/user/hand/left/input/aim/pose"},
+            {g.gripPoseAction, "/user/hand/right/input/grip/pose"},
+            {g.gripPoseAction, "/user/hand/left/input/grip/pose"},
             {g.triggerAction, "/user/hand/right/input/trigger/value"},
+            {g.triggerAction, "/user/hand/left/input/trigger/value"},
             {g.stickAction, "/user/hand/right/input/thumbstick"},
             {g.gripAction, "/user/hand/right/input/squeeze/value"},
+            {g.gripAction, "/user/hand/left/input/squeeze/value"},
             {g.hapticAction, "/user/hand/right/output/haptic"},
             {g.moveStickAction, "/user/hand/left/input/thumbstick"},
             {g.clickAction, "/user/hand/right/input/a/click"},
@@ -1547,58 +1573,76 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
 
     const bool panoMode = g.viewMode.load() == 0 && g.worldView.load() && g.projReady && g.panoRefValid;
 
-    // Point-and-click comes from the controller aim ray only. The head is the user's
-    // viewpoint: it must never drive the cursor, zoom or movement (that made the
-    // canvas swim with every head motion).
+    // Point-and-click comes from a controller ray only (either hand; aim pose first,
+    // grip pose as the tracked-pose fallback). The head is the user's viewpoint: it
+    // must never drive the cursor, zoom or movement (that made the canvas swim).
     static bool aimWasLocated = false;
     bool aimLocated = false;
-    XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
-    const XrResult aimResult = xrLocateSpace(g.aimSpace, g.localSpace,
-                                             frameState.predictedDisplayTime, &location);
-    if ((g.submittedFrames % 300) == 0 && XR_FAILED(aimResult)) {
-        LOGI("aim locate failing: XrResult %d", (int)aimResult);
-    } else if ((g.submittedFrames % 300) == 0 && aimResult == XR_SUCCESS &&
-               (location.locationFlags & (XR_SPACE_LOCATION_POSITION_VALID_BIT |
-                                          XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) !=
-                       (XR_SPACE_LOCATION_POSITION_VALID_BIT |
-                        XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
-        LOGI("aim locate flags incomplete: 0x%llx", (unsigned long long)location.locationFlags);
+    const XrPath handPaths[2] = {g.handPath, g.leftHandPath};
+    bool handLocated[2] = {false, false};
+    XrPosef handPose[2]{};
+    bool handViaGrip[2] = {false, false};
+    for (int h = 0; h < 2; h++) {
+        for (int s = 0; s < 2 && !handLocated[h]; s++) {
+            XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+            const XrResult lr = xrLocateSpace(s == 0 ? g.aimSpace[h] : g.gripSpace[h],
+                                              g.localSpace, frameState.predictedDisplayTime, &loc);
+            if (XR_SUCCEEDED(lr) &&
+                (loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
+                (loc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+                handLocated[h] = true;
+                handViaGrip[h] = s == 1;
+                handPose[h] = loc.pose;
+            } else if (h == 0 && s == 0 && (g.submittedFrames % 300) == 0) {
+                if (XR_FAILED(lr)) {
+                    LOGI("aim locate failing: XrResult %d", (int)lr);
+                } else {
+                    LOGI("aim locate flags incomplete: 0x%llx",
+                         (unsigned long long)loc.locationFlags);
+                }
+            }
+        }
     }
-    if (XR_SUCCEEDED(aimResult) &&
-        (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
-        (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+
+    float triggerState[2] = {0.f, 0.f};
+    bool triggerActive[2] = {false, false};
+    for (int h = 0; h < 2; h++) {
+        XrActionStateFloat t{XR_TYPE_ACTION_STATE_FLOAT};
+        getInfo.action = g.triggerAction;
+        getInfo.subactionPath = handPaths[h];
+        if (XR_SUCCEEDED(xrGetActionStateFloat(g.session, &getInfo, &t))) {
+            triggerState[h] = t.currentState;
+            triggerActive[h] = t.isActive == XR_TRUE;
+        }
+    }
+    const int downHand = triggerState[0] > 0.5f ? 0 : (triggerState[1] > 0.5f ? 1 : -1);
+    const int pointerHand = downHand >= 0 ? downHand
+                            : (handLocated[0] ? 0 : (handLocated[1] ? 1 : -1));
+    if (pointerHand >= 0) {
         aimLocated = true;
+        const XrPosef &pp = handPose[pointerHand];
         if (panoMode) {
             const GlobeView globe = currentGlobe();
-            const Pose aim{Quat{location.pose.orientation.x, location.pose.orientation.y,
-                                location.pose.orientation.z, location.pose.orientation.w},
-                           Vec3{location.pose.position.x, location.pose.position.y,
-                                location.pose.position.z}};
+            const Pose aim{Quat{pp.orientation.x, pp.orientation.y, pp.orientation.z,
+                                pp.orientation.w},
+                           Vec3{pp.position.x, pp.position.y, pp.position.z}};
             globeProjectAssist(aim, globe, u, v);
         } else {
-            rayToScreen(location.pose, u, v);
+            rayToScreen(pp, u, v);
         }
     }
     if (aimLocated != aimWasLocated) {
         aimWasLocated = aimLocated;
-        LOGI("controller aim %s", aimLocated ? "located" : "lost");
+        LOGI("controller aim %s (hand=%d grip=%d)", aimLocated ? "located" : "lost",
+             pointerHand, pointerHand >= 0 ? (int)handViaGrip[pointerHand] : -1);
     }
 
-    XrActionStateFloat trigger{XR_TYPE_ACTION_STATE_FLOAT};
-    getInfo.action = g.triggerAction;
-    getInfo.subactionPath = g.handPath;
-    if (XR_SUCCEEDED(xrGetActionStateFloat(g.session, &getInfo, &trigger))) {
-        // Some runtimes leave isActive false at rest even with valid bindings; the
-        // currentState is still meaningful once the action set is synced.
-        down = trigger.currentState > 0.5f;
-        if (!g.loggedTriggerActive) {
-            g.loggedTriggerActive = true;
-            LOGI("trigger active (state %.2f)", trigger.currentState);
-        }
-    }
+    // Some runtimes leave isActive false at rest even with valid bindings; the
+    // currentState is still meaningful once the action set is synced.
+    down = downHand >= 0;
+    const float triggerMax = std::max(triggerState[0], triggerState[1]);
     if (down != g.triggerDown) {
-        LOGI("trigger %s (active=%d state=%.2f)", down ? "down" : "up", (int)trigger.isActive,
-             trigger.currentState);
+        LOGI("trigger %s (hand=%d state=%.2f)", down ? "down" : "up", downHand, triggerMax);
     }
 
     XrActionStateVector2f stick{XR_TYPE_ACTION_STATE_VECTOR2F};
@@ -1618,19 +1662,21 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
 
         XrHapticActionInfo hapticInfo{XR_TYPE_HAPTIC_ACTION_INFO};
         hapticInfo.action = g.hapticAction;
-        hapticInfo.subactionPath = g.handPath;
+        hapticInfo.subactionPath = downHand == 1 ? g.leftHandPath : g.handPath;
         xrApplyHapticFeedback(g.session, &hapticInfo,
                               reinterpret_cast<const XrHapticBaseHeader *>(&vibration));
     }
     g.triggerDown = down;
 
-    // Grip (squeeze) recenters the virtual screen in front of the user.
-    XrActionStateFloat grip{XR_TYPE_ACTION_STATE_FLOAT};
-    getInfo.action = g.gripAction;
-    getInfo.subactionPath = g.handPath;
+    // Grip (squeeze, either hand) recenters the virtual screen in front of the user.
     bool gripNow = false;
-    if(XR_SUCCEEDED(xrGetActionStateFloat(g.session, &getInfo, &grip))){
-        gripNow = grip.currentState > 0.5f;
+    for (int h = 0; h < 2; h++) {
+        XrActionStateFloat gripState{XR_TYPE_ACTION_STATE_FLOAT};
+        getInfo.action = g.gripAction;
+        getInfo.subactionPath = handPaths[h];
+        if(XR_SUCCEEDED(xrGetActionStateFloat(g.session, &getInfo, &gripState))){
+            gripNow = gripNow || gripState.currentState > 0.5f;
+        }
     }
     if(gripNow && !g.gripDown){
         recenter(env, frameState.predictedDisplayTime);
@@ -1664,9 +1710,10 @@ void renderFrame(JNIEnv *env, const XrFrameState &frameState) {
 
     notifyMove(env, moveX, moveY);
     if ((g.submittedFrames % 300) == 0) {
-        LOGI("input: aimLocated=%d uv=%.2f,%.2f | trigger active=%d state=%.2f | click active=%d state=%d"
-             " | rstk active=%d %.2f,%.2f | lstk active=%d %.2f,%.2f",
-             (int)aimLocated, u, v, (int)trigger.isActive, trigger.currentState,
+        LOGI("input: state=%d aimLocated=%d hand=%d uv=%.2f,%.2f | trigR active=%d %.2f trigL active=%d %.2f"
+             " | click active=%d state=%d | rstk active=%d %.2f,%.2f | lstk active=%d %.2f,%.2f",
+             (int)g.sessionState, (int)aimLocated, pointerHand, u, v,
+             (int)triggerActive[0], triggerState[0], (int)triggerActive[1], triggerState[1],
              (int)clickState.isActive, (int)clickDown, (int)stick.isActive,
              stick.currentState.x, stick.currentState.y, (int)moveStick.isActive,
              moveStick.currentState.x, moveStick.currentState.y);
@@ -1775,7 +1822,10 @@ void cleanupXr(){
         xrEndSession(g.session);
         g.sessionRunning = false;
     }
-    if (g.aimSpace != XR_NULL_HANDLE) xrDestroySpace(g.aimSpace);
+    for (int h = 0; h < 2; h++) {
+        if (g.aimSpace[h] != XR_NULL_HANDLE) xrDestroySpace(g.aimSpace[h]);
+        if (g.gripSpace[h] != XR_NULL_HANDLE) xrDestroySpace(g.gripSpace[h]);
+    }
     if (g.viewSpace != XR_NULL_HANDLE) xrDestroySpace(g.viewSpace);
     if (g.localSpace != XR_NULL_HANDLE) xrDestroySpace(g.localSpace);
     if (g.actionSet != XR_NULL_HANDLE) xrDestroyActionSet(g.actionSet);
@@ -1810,7 +1860,10 @@ void cleanupXr(){
     if (g.session != XR_NULL_HANDLE) xrDestroySession(g.session);
     if (g.instance != XR_NULL_HANDLE) xrDestroyInstance(g.instance);
 
-    g.aimSpace = XR_NULL_HANDLE;
+    for (int h = 0; h < 2; h++) {
+        g.aimSpace[h] = XR_NULL_HANDLE;
+        g.gripSpace[h] = XR_NULL_HANDLE;
+    }
     g.viewSpace = XR_NULL_HANDLE;
     g.localSpace = XR_NULL_HANDLE;
     g.actionSet = XR_NULL_HANDLE;
